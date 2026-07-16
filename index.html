@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dungeon Sweeper</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💀</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<canvas id="fx"></canvas>
+<div id="flash"></div>
+<div id="vignette"></div>
+<div id="scanlines"></div>
+
+<div id="game">
+
+  <!-- ================= MENU ================= -->
+  <div id="menu" class="screen">
+    <div class="title-wrap">
+      <div class="title-cards">
+        <div class="tcard t1">⚔️</div>
+        <div class="tcard t2">🏹</div>
+        <div class="tcard t3">🔥</div>
+      </div>
+      <h1 class="game-title"><span>DUNGEON</span><span class="t-sweep">SWEEPER</span></h1>
+      <p class="tagline">The numbers lie in wait. The cards keep you alive.</p>
+    </div>
+    <div class="menu-buttons">
+      <button id="btn-start" class="btn btn-big btn-red">⛏ DELVE IN</button>
+      <div class="menu-row">
+        <button id="btn-merciful" class="btn btn-toggle">☠ CURSED</button>
+        <button id="btn-help" class="btn">HOW TO PLAY</button>
+      </div>
+    </div>
+    <div id="menu-stats"></div>
+  </div>
+
+  <!-- ================= GAME ================= -->
+  <div id="play" class="screen hidden">
+
+    <div id="sidebar" class="panel">
+      <div class="side-block">
+        <div class="stat-label">VITALITY <span id="block-chip" class="chip hidden"></span></div>
+        <div id="hp-bar" class="bar hp">
+          <div id="hp-ghost" class="bar-ghost"></div>
+          <div id="hp-fill" class="bar-fill"></div>
+          <span id="hp-text" class="bar-text">10/10</span>
+        </div>
+        <div class="stat-label" style="margin-top:10px">ENERGY <span id="energy-text" class="dim"></span></div>
+        <div id="energy-pips"></div>
+        <div class="stat-row">
+          <div id="gold-stat" class="stat-chip gold">🪙 <b id="gold-text">0</b></div>
+          <div class="stat-chip lvl"><b id="level-text">LV 1</b></div>
+        </div>
+        <div id="xp-bar" class="bar xp">
+          <div id="xp-fill" class="bar-fill"></div>
+          <span id="xp-text" class="bar-text"></span>
+        </div>
+      </div>
+
+      <div class="side-block grow">
+        <div class="stat-label">BESTIARY <span class="dim">(hover)</span></div>
+        <div id="bestiary"></div>
+      </div>
+
+      <div class="side-block">
+        <div class="stat-label">RELICS</div>
+        <div id="relics"></div>
+      </div>
+
+      <div class="side-row">
+        <button id="btn-mute" class="btn btn-ico" title="sound">🔊</button>
+        <button id="btn-help-2" class="btn btn-ico" title="help">❓</button>
+        <button id="btn-abandon" class="btn btn-ico" title="abandon run">🏳️</button>
+      </div>
+    </div>
+
+    <div id="main">
+      <div id="topbar">
+        <div id="floor-name" class="floor-plate"></div>
+        <div id="compass-chip" class="chip hidden"></div>
+        <div id="omens"></div>
+      </div>
+      <div id="board-wrap">
+        <div id="board"></div>
+      </div>
+      <div id="hand"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- overlays live OUTSIDE #game so their z-index competes at root level
+     (banners/floaters/particles are appended to <body> by JS) -->
+<div id="modal" class="hidden">
+  <div id="modal-content" class="modal-box"></div>
+</div>
+<div id="toasts"></div>
+<div id="tooltip" class="hidden"></div>
+
+<script src="js/config.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/shader.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
