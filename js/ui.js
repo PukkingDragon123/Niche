@@ -1,7 +1,7 @@
 /* ============================================================
    DUNGEON SWEEPER — UI
    All DOM rendering + input. Listens to DS.Bus events emitted
-   by the engine and translates them into juice.
+   by the engine and translates them into squishy clay juice.
    ============================================================ */
 (function (root) {
 'use strict';
@@ -9,6 +9,9 @@
 const C = root.DS_CONFIG;
 const { Engine, Bus, Sprites, FX } = root.DS;
 const SFX = () => root.DS.Audio.SFX;
+
+const SHARD_IDS = ['goo', 'bone', 'zap', 'ink', 'bolt'];
+const ING_IDS = ['button', 'spring', 'googly', 'fluff', 'star'];
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, html) => {
@@ -25,11 +28,15 @@ let lastHover = null;      // last hovered tile {x,y} (for keyboard card selecti
 let lastNumbers = {};      // tile index -> last rendered number (for pulse)
 let boardGen = 0;          // bumped every buildBoard — stale timers check it
 let lastFloorEnd = null;   // cached floorComplete payload for modal reopens
+let reelTimers = [];       // slot machine animation intervals
 
 /* modals that open on a delay — cancellable if the run ends first */
 const pendingTimers = [];
 function later(fn, ms) { pendingTimers.push(setTimeout(fn, ms)); }
-function cancelPendingModals() { pendingTimers.forEach(clearTimeout); pendingTimers.length = 0; }
+function cancelPendingModals() {
+  pendingTimers.forEach(clearTimeout); pendingTimers.length = 0;
+  reelTimers.forEach(clearInterval); reelTimers.length = 0;
+}
 
 /* ============================================================
    HELPERS
@@ -53,6 +60,22 @@ function cardDesc(card) {
   return d;
 }
 
+function shardChip(color, n) {
+  const def = C.shards[color];
+  return `<span class="mat mat-${color}" title="${def.name}">${def.emoji}${n != null ? `<b>${n}</b>` : ''}</span>`;
+}
+function ingChip(kind, n) {
+  const def = C.ingredients[kind];
+  return `<span class="mat mat-ing" title="${def.name}">${def.emoji}${n != null ? `<b>${n}</b>` : ''}</span>`;
+}
+function recipeHtml(id) {
+  const r = C.cards[id].recipe;
+  let out = '';
+  for (const [c, n] of Object.entries(r.shards || {})) out += shardChip(c, n);
+  for (const [k, n] of Object.entries(r.ing || {})) out += ingChip(k, n);
+  return out;
+}
+
 /* ============================================================
    SCREENS
    ============================================================ */
@@ -67,8 +90,8 @@ function renderMenu() {
     wins = +localStorage.getItem('ds_wins') || 0;
   } catch (e) {}
   $('#menu-stats').innerHTML = best
-    ? `Deepest delve: <b>Floor ${best}</b>${wins ? ` &nbsp;·&nbsp; Dungeons cleared: <b>${wins}</b>` : ''}`
-    : 'The dungeon awaits its first fool…';
+    ? `Deepest delve: <b>Floor ${best}</b>${wins ? ` &nbsp;·&nbsp; Toyboxes conquered: <b>${wins}</b>` : ''}`
+    : 'The toybox awaits its first brave hand…';
 }
 
 /* ============================================================
@@ -104,11 +127,18 @@ function sizeBoard() {
   if (!S() || !S().board) return;
   const wrap = $('#board-wrap');
   const b = S().board;
-  const GAP = 4, PAD = 28 + 6; // grid gaps + board padding/border
+  const GAP = 5, PAD = 30 + 8; // grid gaps + board padding/border
   const availW = wrap.clientWidth - PAD - GAP * (b.w - 1);
   const availH = wrap.clientHeight - PAD - GAP * (b.h - 1);
   const tw = Math.max(22, Math.min(60, Math.floor(Math.min(availW / b.w, availH / b.h))));
   $('#board').style.setProperty('--tw', tw + 'px');
+}
+
+function scryIcon(what) {
+  if (what === 'empty') return '<span class="scry-ic safe">✓</span>';
+  if (what === 'bubble') return `<span class="scry-ic">${Sprites.html('bubble')}</span>`;
+  if (what === 'shards' || what === 'lift') return `<span class="scry-ic">${Sprites.html(what === 'lift' ? 'lift' : 'shard_goo')}</span>`;
+  return `<span class="scry-ic bad">${Sprites.html(what)}</span>`;
 }
 
 function updateTile(t, opts) {
@@ -129,23 +159,20 @@ function updateTile(t, opts) {
     if (t.mark === 2) html += '<span class="mark q">?</span>';
     if (t.scry) {
       d.classList.add('scryed');
-      const what = t.scry;
-      if (what === 'empty') html += '<span class="scry-ic safe">✓</span>';
-      else if (what === 'chest' || what === 'gold' || what === 'stairs') html += `<span class="scry-ic">${Sprites.html(what)}</span>`;
-      else html += `<span class="scry-ic bad">${Sprites.html(what)}</span>`;
+      html += scryIcon(t.scry);
     }
   } else {
     d.classList.add('revealed');
     if (t.rubble) {
-      d.classList.add('rubble');
-      html += Sprites.html('rubble');
+      d.classList.add('gunk');
+      html += '<span class="gunk-blob">🫠</span>';
     } else if (t.monster) {
       const m = t.monster;
       const def = C.monsters[m.type];
       if (m.disguised) {
-        d.classList.add('chest-tile');
-        html += Sprites.html('chest', 'big');
-        if (t.scry) html += `<span class="scry-ic bad">${Sprites.html(t.scry)}</span>`;
+        d.classList.add('bubble-tile');
+        html += '<span class="bubble-orb"></span>';
+        if (t.scry) html += scryIcon(t.scry);
       } else {
         d.classList.add('monster-tile');
         if (def.elite) d.classList.add('elite');
@@ -155,14 +182,15 @@ function updateTile(t, opts) {
         html += `<span class="pwr-badge ${m.pwr > m.basePwr ? 'buffed' : ''}">${m.pwr}</span>`;
         if (def.elite) html += '<span class="crown">👑</span>';
       }
-    } else if (t.kind === 'chest' && !t.opened) {
-      d.classList.add('chest-tile');
-      html += Sprites.html('chest', 'big');
-    } else if (t.kind === 'gold' && !t.collected) {
-      html += Sprites.html('gold', 'big');
-    } else if (t.kind === 'stairs') {
-      d.classList.add('stairs-tile');
-      html += Sprites.html('stairs', 'big');
+    } else if (t.kind === 'bubble' && !t.opened) {
+      d.classList.add('bubble-tile');
+      html += '<span class="bubble-orb"></span>';
+    } else if (t.kind === 'shards' && !t.collected) {
+      d.classList.add('shard-tile');
+      html += `<span class="shard-pile mat-${t.shardColor}">${C.shards[t.shardColor].emoji}</span>`;
+    } else if (t.kind === 'lift') {
+      d.classList.add('lift-tile');
+      html += Sprites.html('lift', 'big');
       const f = C.floors[S().floor - 1];
       if (f.boss && S().board.tiles.some(x => x.monster && C.monsters[x.monster.type].boss)) {
         html += `<span class="lock-ov">${Sprites.html('lock')}</span>`;
@@ -176,9 +204,9 @@ function updateTile(t, opts) {
         html += `<span class="num ${numClass(n)}">${n}</span>`;
         if (prev != null && prev !== n && opts && opts.pulse) d.classList.add('num-pulse');
       }
-      if (t.corpse) html += `<span class="corpse-ov">${Sprites.html('corpse')}</span>`;
-      if (t.kind === 'chest' && t.opened) html += `<span class="corpse-ov">${Sprites.html('chest_open')}</span>`;
-      if (t.kind === 'gold' && t.collected) html += `<span class="corpse-ov">${Sprites.html('gold')}</span>`;
+      if (t.corpse) html += `<span class="corpse-ov">${Sprites.html('splat')}</span>`;
+      if (t.kind === 'bubble' && t.opened) html += '<span class="corpse-ov popped-ring"></span>';
+      if (t.kind === 'shards' && t.collected) html += `<span class="corpse-ov dim-chip">${C.shards[t.shardColor].emoji}</span>`;
     }
   }
   face.innerHTML = html;
@@ -210,8 +238,9 @@ function renderHUD() {
   pips.innerHTML = '';
   for (let i = 0; i < max; i++) pips.appendChild(el('span', 'pip' + (i < s.energy ? ' full' : '')));
   $('#energy-text').textContent = `${s.energy}/${max}`;
-  // gold
-  $('#gold-text').textContent = s.gold;
+  // stash
+  $('#stash-shards').innerHTML = SHARD_IDS.map(c => shardChip(c, s.frags[c])).join('');
+  $('#stash-ing').innerHTML = ING_IDS.map(k => ingChip(k, s.ing[k])).join('');
   // xp
   $('#level-text').textContent = 'LV ' + s.level;
   $('#xp-fill').style.width = Math.min(100, s.xp / Engine.xpNeeded() * 100) + '%';
@@ -263,7 +292,7 @@ function renderBestiary() {
   const wrap = $('#bestiary');
   wrap.innerHTML = '';
   if (!S().placed) {
-    wrap.appendChild(el('div', 'bestiary-hint', 'Click any tile to begin.<br>Numbers show the TOTAL POWER of monsters in the 8 tiles around them.'));
+    wrap.appendChild(el('div', 'bestiary-hint', 'Poke any tile to begin.<br>Numbers show the TOTAL POWER of monsters in the 8 tiles around them.'));
     return;
   }
   for (const row of Engine.bestiary()) {
@@ -271,14 +300,14 @@ function renderBestiary() {
     d.innerHTML = `${Sprites.html(row.type)}<span class="b-pwr">${row.def.pwr}</span><span class="b-name">${row.def.name}</span><span class="b-count">×${row.count}</span>`;
     if (row.def.ethereal) d.classList.add('ethereal');
     d.addEventListener('mouseenter', (e) => showTip(
-      `<b>${Sprites.html(row.type)} ${row.def.name}</b> — power ${row.def.pwr}<br><i>${row.def.desc}</i>`, e.clientX, e.clientY));
+      `<b>${Sprites.html(row.type)} ${row.def.name}</b> — power ${row.def.pwr} · drops ${shardChip(row.def.frag)}<br><i>${row.def.desc}</i>`, e.clientX, e.clientY));
     d.addEventListener('mouseleave', hideTip);
     wrap.appendChild(d);
   }
 }
 
 /* ============================================================
-   HAND / CARDS
+   HAND / SQUAD
    ============================================================ */
 function cardEl(card, idx, opts) {
   opts = opts || {};
@@ -296,7 +325,7 @@ function cardEl(card, idx, opts) {
     <div class="card-art">${Sprites.html('card_' + card.id)}</div>
     <div class="card-name">${def.name.toUpperCase()}${card.tier > 1 ? '+' : ''}</div>
     <div class="card-desc">${cardDesc(card)}</div>
-    ${def.exhaust ? `<div class="card-ex">${exhausted ? 'SPENT' : '1×/FLOOR'}</div>` : ''}
+    ${def.exhaust ? `<div class="card-ex">${exhausted ? 'TIRED' : '1×/FLOOR'}</div>` : ''}
     <div class="card-shine"></div>`;
   return d;
 }
@@ -329,7 +358,7 @@ function onCardClick(idx) {
     const card = s.deck[idx];
     const def = C.cards[card.id];
     if (chk.why === 'energy') { toastLocal(`Need ${Engine.cardCost(card)}⚡ — reveal tiles to charge up!`, 'warn'); FX.shake('sm'); }
-    else if (chk.why === 'exhausted') toastLocal(`${def.name} is spent for this floor.`, 'warn');
+    else if (chk.why === 'exhausted') toastLocal(`${def.name} is tuckered out for this floor.`, 'warn');
     return;
   }
   const def = C.cards[s.deck[idx].id];
@@ -435,72 +464,26 @@ function closeModal() { $('#modal').classList.add('hidden'); }
 
 function helpModal() {
   openModal(`
-    <h2>📜 HOW TO SWEEP A DUNGEON</h2>
+    <h2>📖 HOW TO SWEEP A TOYBOX</h2>
     <div class="help-grid">
-      <p><b>Numbers are SUMS.</b> A revealed tile shows the <i>total power</i> of all monsters in the 8 tiles around it. A "5" might be five rats… or one orc.</p>
-      <p><b>Clicking a hidden monster = AMBUSH.</b> It bites you for its power, then stands there, exposed. Click an exposed monster to slay it barehanded — for its power in HP <i>again</i>.</p>
-      <p><b>Cards kill for free.</b> Instead of flags, you have a belt of cards. ${Sprites.html('card_bow')} Bow can snipe a tile you <i>deduced</i> holds a monster — no ambush. ${Sprites.html('card_torch')} Torch uncovers areas safely.</p>
+      <p><b>Numbers are SUMS.</b> A revealed tile shows the <i>total power</i> of all monsters in the 8 tiles around it. A "5" might be five Rabbles… or one Gronk.</p>
+      <p><b>Poking a hidden monster = AMBUSH.</b> It bops you for its power, then stands there, exposed. Poke an exposed monster to squish it barehanded — for its power in HP <i>again</i>.</p>
+      <p><b>Your creatures fight for free.</b> ${Sprites.html('card_bow')} Boombo can snipe a tile you <i>deduced</i> holds a monster — no ambush. ${Sprites.html('card_torch')} Wicky lights up whole areas safely.</p>
       <p><b>⚡ Energy comes from revealing tiles.</b> Every safe tile you uncover charges +1⚡. Risk feeds power.</p>
-      <p><b>👻 Ghosts are invisible to numbers</b> and drift around. 👿 Mimics look exactly like chests. 🦇 Bats move. 🧙 Shamans make everything worse. Watch the <b>omen timers</b> and read the <b>bestiary</b>.</p>
-      <p><b>🎁 Chests</b> hold new cards (duplicates upgrade!). ${Sprites.html('gold')} buys from the shop between floors. ${Sprites.html('stairs')} descends — bosses seal them.</p>
-      <p><b>Right-click</b> chalks a note on a tile. <b>ESC</b> cancels a card. Survive all ${C.floors.length} floors.</p>
+      <p><b>Squished monsters crumble into SHARDS</b> ${Sprites.html('shard_goo')}${Sprites.html('shard_bone')}${Sprites.html('shard_zap')}${Sprites.html('shard_ink')}${Sprites.html('shard_bolt')} and <b>bubbles</b> hide crafting ingredients. At the <b>WORKSHOP</b> between floors, craft them into new creatures — crafting a duplicate upgrades it!</p>
+      <p><b>👻 Boolets are invisible to numbers</b> and drift around. 🦪 Mimics look exactly like bubbles. 🐱 Napcats move. 🍄 Sporecaps make everything worse. Watch the <b>omen timers</b> and read the <b>bestiary</b>.</p>
+      <p><b>🎰 The LUCKY LIFT</b> is the only way down — find it, board it, and PULL THE LEVER. Triple ⭐ pays out a trinket! Bosses jam the lift until they're squished.</p>
+      <p><b>Right-click</b> chalks a note on a tile. <b>ESC</b> cancels a creature. Survive all ${C.floors.length} floors.</p>
     </div>
     <button class="btn btn-red" id="btn-close-help">GOT IT</button>
   `, 'modal-help');
   $('#btn-close-help').onclick = () => { closeModal(); };
 }
 
-function chestModal(offers) {
-  const box = openModal(`
-    <h2>✨ TREASURE! ✨</h2>
-    <p class="modal-sub">Choose one card to add to your belt</p>
-    <div class="booster" id="booster"></div>
-    <button class="btn" id="btn-skip-chest">LEAVE IT (+${C.economy.chestSkipGold}g)</button>
-  `, 'modal-chest');
-  const wrap = box.querySelector('#booster');
-  offers.forEach((o, i) => {
-    const card = { id: o.id, tier: 1 };
-    const holder = el('div', 'flip-holder');
-    holder.style.setProperty('--d', (i * 0.18) + 's');
-    const inner = el('div', 'flip-inner');
-    inner.appendChild(el('div', 'card card-back flip-back', '<div class="back-gem">◆</div>'));
-    const front = cardEl(card, i, { static: true });
-    front.classList.add('flip-front');
-    const owned = S().deck.find(c => c.id === o.id);
-    if (owned) front.appendChild(el('div', 'owned-tag', owned.tier === 1 ? 'UPGRADES!' : `+${C.economy.dupSellGold}g`));
-    inner.appendChild(front);
-    holder.appendChild(inner);
-    holder.addEventListener('click', () => {
-      const res = Engine.pickChestCard(i);
-      if (res.needsSlot) return; // deckFull event opens replace modal
-      closeModal();
-    });
-    wrap.appendChild(holder);
-  });
-  box.querySelector('#btn-skip-chest').onclick = () => { Engine.skipChest(); closeModal(); };
-}
-
-function replaceModal(incomingId) {
-  const inc = C.cards[incomingId];
-  const box = openModal(`
-    <h2>BELT FULL!</h2>
-    <p class="modal-sub">Replace a card with <b>${Sprites.html('card_' + incomingId)} ${inc.name}</b> — or leave it (+${C.economy.chestSkipGold}g)</p>
-    <div class="deck-grid" id="deck-grid"></div>
-    <button class="btn" id="btn-skip-replace">KEEP MY DECK</button>
-  `, 'modal-replace');
-  const grid = box.querySelector('#deck-grid');
-  S().deck.forEach((card, i) => {
-    const d = cardEl(card, i, { static: true });
-    d.addEventListener('click', () => { Engine.replaceCard(i); closeModal(); });
-    grid.appendChild(d);
-  });
-  box.querySelector('#btn-skip-replace').onclick = () => { Engine.skipChest(); closeModal(); };
-}
-
 function relicChoiceModal(offers) {
   const box = openModal(`
-    <h2>👑 THE BOSS'S HOARD</h2>
-    <p class="modal-sub">Claim ONE relic</p>
+    <h2>👑 THE HOARD</h2>
+    <p class="modal-sub">Claim ONE trinket</p>
     <div class="relic-choice" id="relic-choice"></div>
   `, 'modal-relic');
   const wrap = box.querySelector('#relic-choice');
@@ -509,7 +492,12 @@ function relicChoiceModal(offers) {
       <div class="relic-big">${Sprites.html('relic_' + o.id)}</div>
       <div class="relic-name">${o.def.name}</div>
       <div class="relic-desc">${o.def.desc}</div>`);
-    d.addEventListener('click', () => { Engine.pickRelic(i); closeModal(); });
+    d.addEventListener('click', () => {
+      Engine.pickRelic(i);
+      // a slot-machine jackpot returns to the lift; a mid-floor drop just closes
+      if (S().phase === 'floorEnd') liftModal(lastFloorEnd || { floor: S().floor, seal: 0, last: S().floor >= C.floors.length });
+      else closeModal();
+    });
     wrap.appendChild(d);
   });
 }
@@ -518,108 +506,226 @@ function lethalModal(t, dmg) {
   const m = t.monster;
   const def = C.monsters[m.type];
   const box = openModal(`
-    <h2 class="danger-title">⚠ DEATH WARNING ⚠</h2>
-    <p class="modal-sub">Charging the <b>${Sprites.html(m.type)} ${def.name}</b> costs <b class="red">${dmg} HP</b> — you have <b>${S().hp}</b>.<br>This will be your end.</p>
+    <h2 class="danger-title">⚠ SQUISH WARNING ⚠</h2>
+    <p class="modal-sub">Charging the <b>${Sprites.html(m.type)} ${def.name}</b> costs <b class="red">${dmg} HP</b> — you have <b>${S().hp}</b>.<br>You will be the one squished.</p>
     <div class="btn-row">
       <button class="btn" id="btn-flee">FLEE</button>
-      <button class="btn btn-red" id="btn-glory">DIE GLORIOUSLY</button>
+      <button class="btn btn-red" id="btn-glory">SQUISH ANYWAY</button>
     </div>
   `, 'modal-lethal');
   box.querySelector('#btn-flee').onclick = closeModal;
   box.querySelector('#btn-glory').onclick = () => { closeModal(); Engine.clickTile(t.x, t.y, true); };
 }
 
-function floorEndModal(data) {
+/* ============================================================
+   THE LUCKY LIFT (slot machine + workshop, between floors)
+   ============================================================ */
+function liftModal(data) {
   const s = S();
   const isLast = data.last;
-  const shop = s.shop;
+  const spun = s.lift && s.lift.spun;
   const box = openModal(`
-    <h2>${isLast ? '💓 THE HEART LIES STILL' : '🏆 FLOOR ' + data.floor + ' CLEARED'}</h2>
-    ${data.seal ? `<p class="modal-sub gold-text">DUNGEON SEALED — every monster slain! +${data.seal}g</p>` : ''}
-    <div class="shop" id="shop-box">
-      <div class="shop-head">🛒 THE RAT PEDDLER <span class="shop-gold">${Sprites.html('gold')} <b id="shop-gold-n">${s.gold}</b></span></div>
-      <div class="shop-cards" id="shop-cards"></div>
+    <h2>${isLast ? '🎪 THE THRONE IS EMPTY' : '🎰 THE LUCKY LIFT'}</h2>
+    ${data.seal ? `<p class="modal-sub gold-text">SPOTLESS SWEEP — every monster squished! +${data.seal} shards</p>` : ''}
+    <div class="lift-machine" id="lift-machine">
+      <div class="lift-bot">${Sprites.html('slotbot', 'lift-bot-img')}</div>
+      <div class="reels" id="reels">
+        <div class="reel" id="reel-0"><span>❔</span></div>
+        <div class="reel" id="reel-1"><span>❔</span></div>
+        <div class="reel" id="reel-2"><span>❔</span></div>
+      </div>
+      <div class="lift-msg" id="lift-msg">${spun ? '' : 'Pull the lever to power the lift!'}</div>
+      <button class="btn btn-big btn-gold ${spun ? 'hidden' : ''}" id="btn-lever">🎰 PULL!</button>
+    </div>
+    <div class="workshop" id="workshop-box">
+      <div class="shop-head">${Sprites.html('workshop')} CLUCKER'S WORKSHOP <span class="shop-note">craft creatures from shards</span></div>
+      <div class="stash-row" id="ws-stash"></div>
+      <div class="shop-cards" id="ws-offers"></div>
       <div class="shop-row">
-        <button class="btn btn-sm" id="btn-shop-heal">🩹 Patch up +${C.economy.shopHealAmount} HP — ${C.economy.shopHealCost}g</button>
-        <button class="btn btn-sm" id="btn-shop-remove">🗑 Discard a card — ${C.economy.shopRemoveCost}g</button>
-        <button class="btn btn-sm" id="btn-rest">🔥 Rest +${C.economy.restHeal} HP (free)</button>
+        <button class="btn btn-sm" id="btn-snack">🍪 Bake a snack +${C.economy.snackHeal} HP — ${C.economy.snackCost} shards (any mix)</button>
+        <button class="btn btn-sm" id="btn-recycle">♻️ Melt a creature +${C.economy.recycleRefund} shards</button>
+        <button class="btn btn-sm" id="btn-nap">😴 Nap +${C.economy.restHeal} HP (free)</button>
       </div>
     </div>
-    <button class="btn btn-big btn-red" id="btn-descend">${isLast ? 'CLAIM VICTORY' : 'DESCEND ▼'}</button>
+    <button class="btn btn-big btn-red" id="btn-descend" ${spun ? '' : 'disabled'}>${isLast ? 'RIDE HOME ▲' : 'RIDE DOWN ▼'}</button>
   `, 'modal-floorend');
-  renderShop();
-  box.querySelector('#btn-descend').onclick = () => { closeModal(); Engine.nextFloor(); };
+
+  if (spun) {
+    s.lift.reels.forEach((sym, i) => { $('#reel-' + i).innerHTML = `<span>${C.lift.symbols[sym].emoji}</span>`; });
+  } else {
+    box.querySelector('#btn-lever').onclick = pullLever;
+  }
+  renderWorkshop();
+  box.querySelector('#btn-descend').onclick = () => {
+    const r = Engine.nextFloor();
+    if (r.ok) closeModal();
+    else if (r.why === 'spin') toastLocal('Pull the lever first — the lift needs luck to move!', 'warn');
+  };
 }
 
-function renderShop() {
+function pullLever() {
+  const res = Engine.spinLift();
+  if (!res.ok) return;
+  const lever = $('#btn-lever');
+  if (lever) lever.classList.add('hidden');
+  SFX().spin();
+  const gen = boardGen;
+  // spin the reels, stagger the stops
+  const symbols = Object.keys(C.lift.symbols);
+  res.reels.forEach((finalSym, i) => {
+    const reel = $('#reel-' + i);
+    if (!reel) return;
+    const iv = setInterval(() => {
+      const r = symbols[Math.floor(Math.random() * symbols.length)];
+      reel.innerHTML = `<span class="blur">${C.lift.symbols[r].emoji}</span>`;
+    }, 70);
+    reelTimers.push(iv);
+    later(() => {
+      clearInterval(iv);
+      reel.innerHTML = `<span>${C.lift.symbols[finalSym].emoji}</span>`;
+      reel.classList.add('reel-stop');
+      SFX().reelStop();
+    }, 700 + i * 450);
+  });
+  later(() => {
+    if (gen !== boardGen && S().phase !== 'floorEnd') return;
+    showLiftPayout(res);
+  }, 700 + 2 * 450 + 250);
+}
+
+function showLiftPayout(res) {
+  const msg = $('#lift-msg');
+  const btn = $('#btn-descend');
+  if (btn) btn.disabled = false;
+  const g = res.gains;
+  let text = '';
+  if (res.kind === 'triple' && g.relic) {
+    text = '⭐⭐⭐ JACKPOT! A TRINKET RISES FROM THE COIN SLOT!';
+    SFX().jackpot();
+    FX.flash('gold');
+    FX.burst(innerWidth / 2, innerHeight / 2, { count: 60, colors: FX.PALETTES.gold, speed: 9, grav: 0.12 });
+    // the relicChoice event opens the picker on top of us
+  } else if (res.kind !== 'none') {
+    const bits = [];
+    if (g.hp) bits.push(`+${g.hp} HP`);
+    if (g.energy) bits.push(`+${g.energy}⚡ next floor`);
+    if (g.shards) bits.push(`+${g.shards.n} ${C.shards[g.shards.color].name} shards`);
+    if (g.ingredients.length) bits.push('+' + g.ingredients.map(k => C.ingredients[k].emoji).join(''));
+    text = (res.kind === 'triple' ? '🎉 TRIPLE! ' : '✨ PAIR! ') + bits.join(' · ');
+    SFX().jackpot();
+    FX.burst(innerWidth / 2, innerHeight / 3, { count: 26, colors: FX.PALETTES.gold, speed: 6 });
+  } else {
+    text = `Clunk… no match. Glitchy apologizes with +${res.gains.shards ? res.gains.shards.n + ' ' + C.shards[res.gains.shards.color].name : 'a few'} shards.`;
+    SFX().coin();
+  }
+  if (msg) msg.textContent = text;
+  renderWorkshop(); // stash changed
+}
+
+function renderWorkshop() {
   const s = S();
-  const shop = s.shop;
-  if (!shop || !$('#shop-cards')) return;
-  const wrap = $('#shop-cards');
+  const w = s.workshop;
+  if (!w || !$('#ws-offers')) return;
+  // stash summary
+  $('#ws-stash').innerHTML =
+    SHARD_IDS.map(c => shardChip(c, s.frags[c])).join('') +
+    '<span class="stash-gap"></span>' +
+    ING_IDS.map(k => ingChip(k, s.ing[k])).join('');
+  // offers
+  const wrap = $('#ws-offers');
   wrap.innerHTML = '';
-  const goldN = $('#shop-gold-n');
-  if (goldN) goldN.textContent = s.gold;
-  shop.cards.forEach((item, i) => {
-    const holder = el('div', 'shop-item' + (item.sold ? ' sold' : ''));
-    const d = cardEl({ id: item.id, tier: 1 }, i, { static: true });
-    holder.appendChild(d);
-    const owned = s.deck.find(c => c.id === item.id);
-    const tag = owned ? (owned.tier === 1 ? ' (upgrade!)' : '') : '';
-    holder.appendChild(el('div', 'price' + (s.gold < item.price ? ' broke' : ''), item.sold ? 'SOLD' : `${item.price}g${tag}`));
-    if (!item.sold) holder.addEventListener('click', () => {
-      const r = Engine.shopBuy(i);
-      if (!r.ok && !r.full) { FX.shake('sm'); toastLocal('Not enough gold!', 'warn'); }
-      renderShop();
-    });
+  w.offers.forEach((id, i) => {
+    const holder = el('div', 'shop-item' + (id ? '' : ' sold'));
+    if (id) {
+      const d = cardEl({ id, tier: 1 }, i, { static: true });
+      holder.appendChild(d);
+      const owned = s.deck.find(c => c.id === id);
+      const afford = Engine.canAfford(C.cards[id].recipe);
+      const tag = owned ? '<div class="up-tag">UPGRADES!</div>' : '';
+      holder.appendChild(el('div', 'price' + (afford ? '' : ' broke'), `${recipeHtml(id)}${tag}`));
+      holder.addEventListener('click', () => {
+        const r = Engine.craftOffer(i);
+        if (!r.ok && r.why === 'materials') { FX.shake('sm'); toastLocal('Not enough materials! Squish more monsters, pop more bubbles.', 'warn'); }
+        else if (r.ok && r.needsSlot) replaceCraftModal(id);
+        else if (r.ok) SFX().chest();
+        renderWorkshop();
+      });
+    } else {
+      holder.appendChild(el('div', 'crafted-slot', 'CRAFTED'));
+    }
     wrap.appendChild(holder);
   });
-  const healBtn = $('#btn-shop-heal');
-  const remBtn = $('#btn-shop-remove');
-  const restBtn = $('#btn-rest');
-  if (healBtn) {
-    healBtn.disabled = shop.healUsed || s.gold < C.economy.shopHealCost || s.hp >= s.maxHp;
-    healBtn.onclick = () => { Engine.shopHeal(); renderShop(); };
+  const snackBtn = $('#btn-snack');
+  const recycleBtn = $('#btn-recycle');
+  const napBtn = $('#btn-nap');
+  if (snackBtn) {
+    snackBtn.disabled = w.snackUsed || Engine.totalShards() < C.economy.snackCost || s.hp >= s.maxHp;
+    snackBtn.onclick = () => { Engine.craftSnack(); renderWorkshop(); };
   }
-  if (remBtn) {
-    remBtn.disabled = s.gold < C.economy.shopRemoveCost || s.deck.length <= 1;
-    remBtn.onclick = () => removeCardModal();
+  if (recycleBtn) {
+    recycleBtn.disabled = s.deck.length <= 1;
+    recycleBtn.onclick = () => recycleModal();
   }
-  if (restBtn) {
-    restBtn.disabled = shop.rested;
-    restBtn.textContent = shop.rested ? '🔥 Rested' : `🔥 Rest +${C.economy.restHeal} HP (free)`;
-    restBtn.onclick = () => { Engine.rest(); renderShop(); };
+  if (napBtn) {
+    napBtn.disabled = w.napped;
+    napBtn.textContent = w.napped ? '😴 Napped' : `😴 Nap +${C.economy.restHeal} HP (free)`;
+    napBtn.onclick = () => { Engine.nap(); renderWorkshop(); };
   }
 }
 
-function removeCardModal() {
+function reopenLift() {
+  liftModal(lastFloorEnd || { floor: S().floor, seal: 0, last: S().floor >= C.floors.length });
+}
+
+function replaceCraftModal(incomingId) {
+  const inc = C.cards[incomingId];
   const box = openModal(`
-    <h2>🗑 DISCARD A CARD</h2>
-    <p class="modal-sub">Pay ${C.economy.shopRemoveCost}g to unclutter your belt</p>
+    <h2>SQUAD FULL!</h2>
+    <p class="modal-sub">Melt a squad member to make room for <b>${Sprites.html('card_' + incomingId)} ${inc.name}</b> — or keep your squad</p>
     <div class="deck-grid" id="deck-grid"></div>
-    <button class="btn" id="btn-cancel-remove">NEVER MIND</button>
+    <button class="btn" id="btn-skip-replace">KEEP MY SQUAD</button>
   `, 'modal-replace');
-  const reopen = () => floorEndModal(lastFloorEnd || { floor: S().floor, seal: 0, last: S().floor >= C.floors.length });
   const grid = box.querySelector('#deck-grid');
   S().deck.forEach((card, i) => {
     const d = cardEl(card, i, { static: true });
     d.addEventListener('click', () => {
-      const r = Engine.shopRemove(i);
-      if (r.ok || r.why === 'lastWeapon') reopen();
+      const r = Engine.replaceCraft(i);
+      if (r.ok || r.why === 'lastWeapon') reopenLift();
     });
     grid.appendChild(d);
   });
-  box.querySelector('#btn-cancel-remove').onclick = reopen;
+  box.querySelector('#btn-skip-replace').onclick = () => { Engine.cancelCraft(); reopenLift(); };
+}
+
+function recycleModal() {
+  const box = openModal(`
+    <h2>♻️ MELT A CREATURE</h2>
+    <p class="modal-sub">Melt one down for +${C.economy.recycleRefund} shards of its color</p>
+    <div class="deck-grid" id="deck-grid"></div>
+    <button class="btn" id="btn-cancel-remove">NEVER MIND</button>
+  `, 'modal-replace');
+  const grid = box.querySelector('#deck-grid');
+  S().deck.forEach((card, i) => {
+    const d = cardEl(card, i, { static: true });
+    d.addEventListener('click', () => {
+      const r = Engine.recycleCreature(i);
+      if (r.ok || r.why === 'lastWeapon') reopenLift();
+    });
+    grid.appendChild(d);
+  });
+  box.querySelector('#btn-cancel-remove').onclick = reopenLift;
 }
 
 function deathModal(data) {
   saveBest();
   openModal(`
-    <h2 class="danger-title">☠ SLAIN ☠</h2>
-    <p class="modal-sub">Felled by <b>${data.source || 'the dungeon'}</b> on floor ${data.floor}</p>
+    <div class="death-art">${Sprites.html('reaper', 'death-img')}</div>
+    <h2 class="danger-title">☠ SQUISHED ☠</h2>
+    <p class="modal-sub">The Pink Reaper collected you — felled by <b>${data.source || 'the toybox'}</b> on floor ${data.floor}</p>
     <div class="stats-grid">
-      <div>Monsters slain <b>${data.stats.kills}</b></div>
-      <div>Gold amassed <b>${data.stats.goldEarned}</b></div>
-      <div>Chests looted <b>${data.stats.chests}</b></div>
+      <div>Monsters squished <b>${data.stats.kills}</b></div>
+      <div>Shards gathered <b>${data.stats.shardsEarned}</b></div>
+      <div>Bubbles popped <b>${data.stats.bubbles}</b></div>
       <div>Level reached <b>${data.level}</b></div>
     </div>
     <div class="btn-row">
@@ -634,12 +740,13 @@ function deathModal(data) {
 function victoryModal(data) {
   saveBest(true);
   openModal(`
-    <h2 class="gold-text">👑 DUNGEON CLEARED 👑</h2>
-    <p class="modal-sub">The Heart is silent. The halls are yours.</p>
+    <div class="death-art">${Sprites.html('player', 'death-img')}</div>
+    <h2 class="gold-text">👑 TOYBOX CONQUERED 👑</h2>
+    <p class="modal-sub">The Toybox King is squished. The playroom is yours.</p>
     <div class="stats-grid">
-      <div>Monsters slain <b>${data.stats.kills}</b></div>
-      <div>Gold amassed <b>${data.stats.goldEarned}</b></div>
-      <div>Chests looted <b>${data.stats.chests}</b></div>
+      <div>Monsters squished <b>${data.stats.kills}</b></div>
+      <div>Shards gathered <b>${data.stats.shardsEarned}</b></div>
+      <div>Bubbles popped <b>${data.stats.bubbles}</b></div>
       <div>Final level <b>${data.level}</b></div>
     </div>
     <div class="btn-row">
@@ -716,20 +823,22 @@ function onBoardHover(e) {
   const t = Engine.tileAt(+tEl.dataset.x, +tEl.dataset.y);
   if (!t) return;
   // NOTE: a revealed disguised mimic MUST get the exact same tooltip as a real
-  // chest — any difference is a free mimic detector.
-  const looksLikeChest = t.revealed && !t.opened &&
-    ((t.kind === 'chest' && !t.monster) || (t.monster && t.monster.disguised));
-  if (looksLikeChest) {
-    showTip(`${Sprites.html('chest')} <b>A chest…</b> or is it? Click to open. Arrows can test it from afar.`, e.clientX, e.clientY);
+  // bubble — any difference is a free mimic detector.
+  const looksLikeBubble = t.revealed && !t.opened &&
+    ((t.kind === 'bubble' && !t.monster) || (t.monster && t.monster.disguised));
+  if (looksLikeBubble) {
+    showTip(`${Sprites.html('bubble')} <b>A bubble…</b> or is it? Pop it for ingredients. Boombo can test it from afar.`, e.clientX, e.clientY);
   } else if (t.revealed && t.monster && !t.monster.disguised) {
     const def = C.monsters[t.monster.type];
-    const extra = def.unbumpable ? '<br><b class="red">Immune to bare hands — cards only!</b>'
-      : `<br>Slay by hand: costs <b class="red">${t.monster.pwr} HP</b>`;
+    const extra = def.unbumpable ? '<br><b class="red">Immune to bare hands — creatures only!</b>'
+      : `<br>Squish by hand: costs <b class="red">${t.monster.pwr} HP</b>`;
     showTip(`<b>${Sprites.html(t.monster.type)} ${def.name}</b> — power ${t.monster.pwr}${t.monster.pwr !== t.monster.basePwr ? ` (base ${t.monster.basePwr})` : ''}<br><i>${def.desc}</i>${extra}`, e.clientX, e.clientY);
   } else if (!t.revealed && t.web) {
     showTip(`${Sprites.html('web')} <b>Webbed</b> — costs 1⚡ to tear (1 HP if you have no ⚡)`, e.clientX, e.clientY);
-  } else if (t.revealed && t.kind === 'stairs') {
-    showTip(`${Sprites.html('stairs')} <b>The stairs down.</b> Click to descend` + (tEl.classList.contains('locked') ? ' — <b class="red">sealed by the boss!</b>' : '.'), e.clientX, e.clientY);
+  } else if (t.revealed && t.kind === 'shards' && !t.collected) {
+    showTip(`${C.shards[t.shardColor].emoji} <b>Loose ${C.shards[t.shardColor].name} shards.</b> Walk over them to scoop them up.`, e.clientX, e.clientY);
+  } else if (t.revealed && t.kind === 'lift') {
+    showTip(`${Sprites.html('lift')} <b>The Lucky Lift.</b> Board it to leave the floor` + (tEl.classList.contains('locked') ? ' — <b class="red">jammed by the boss!</b>' : ' — and spin for prizes.'), e.clientX, e.clientY);
   } else hideTip();
 }
 
@@ -770,7 +879,7 @@ function wireEvents() {
     updateAllTiles();
     $('#compass-chip').classList.add('hidden');
     banner(`FLOOR ${floor} — ${cfg.name.toUpperCase()}`, 'banner-floor');
-    if (cfg.boss) { SFX().boss(); toastLocal(`⚠ ${C.monsters[cfg.boss].name} dwells here. The stairs are sealed!`, 'bad'); }
+    if (cfg.boss) { SFX().boss(); toastLocal(`⚠ ${C.monsters[cfg.boss].name} lives here. The Lucky Lift is jammed!`, 'bad'); }
   });
 
   Bus.on('boardPlaced', () => { renderBestiary(); renderOmens(); });
@@ -778,7 +887,7 @@ function wireEvents() {
   Bus.on('compass', ({ hint }) => {
     const chip = $('#compass-chip');
     chip.classList.remove('hidden');
-    chip.innerHTML = `🧭 stairs: <b>${hint}</b>`;
+    chip.innerHTML = `🧭 lift: <b>${hint}</b>`;
   });
 
   Bus.on('reveal', ({ batch, manual }) => {
@@ -792,7 +901,7 @@ function wireEvents() {
         d.classList.add('pop-in');
         if (manual) SFX().cascade(Math.min(i, 14));
         if (entry.energyGained > 0 && i < 8) FX.floater(d, '+1⚡', 'f-energy');
-        if (t.kind === 'gold' && t.collected && t.goldAmt) FX.burstAt(d, { count: 10, colors: FX.PALETTES.gold, speed: 4 });
+        if (t.kind === 'shards' && t.collected && t.shardAmt) FX.burstAt(d, { count: 10, colors: FX.PALETTES.gold, speed: 4 });
       }, i * 36);
     });
     if (manual && batch.length >= 6) setTimeout(() => { if (gen === boardGen) FX.flash('energy'); }, batch.length * 18);
@@ -855,15 +964,24 @@ function wireEvents() {
     updateAllTiles({ pulse: true });
     renderBestiary();
     renderOmens();
-    if (def.boss) { FX.shake('lg'); FX.flash('gold'); banner(def.name.toUpperCase() + ' DESTROYED!', 'banner-boss'); SFX().boss(); }
-    else if (def.elite) { FX.flash('gold'); banner('ELITE SLAIN!', 'banner-boss'); }
+    if (def.boss) { FX.shake('lg'); FX.flash('gold'); banner(def.name.toUpperCase() + ' SQUISHED!', 'banner-boss'); SFX().boss(); }
+    else if (def.elite) { FX.flash('gold'); banner('ELITE SQUISHED!', 'banner-boss'); }
   });
 
-  Bus.on('gold', ({ gained, at }) => {
+  Bus.on('shards', ({ color, gained, at }) => {
     if (gained > 0) SFX().coin();
     renderHUD();
-    bumpStat('#gold-stat');
-    if (at && tileEl(at)) FX.floater(tileEl(at), (gained > 0 ? '+' : '') + gained + 'g', 'f-gold');
+    bumpStat('#stash-shards');
+    if (at && tileEl(at) && color && gained > 0)
+      FX.floater(tileEl(at), `+${gained} ${C.shards[color].emoji}`, 'f-gold');
+  });
+
+  Bus.on('ingredients', ({ kind, gained, at }) => {
+    if (gained > 0) SFX().coin();
+    renderHUD();
+    bumpStat('#stash-ing');
+    if (at && tileEl(at) && gained > 0)
+      FX.floater(tileEl(at), `+${gained} ${C.ingredients[kind].emoji}`, 'f-gold');
   });
 
   Bus.on('xp', ({ gained, at }) => {
@@ -956,7 +1074,7 @@ function wireEvents() {
 
   Bus.on('cardGained', ({ id }) => {
     const def = C.cards[id];
-    toastLocal(`${Sprites.html('card_' + id)} ${def.name} joins your belt!`, 'good');
+    toastLocal(`${Sprites.html('card_' + id)} ${def.name} joins your squad!`, 'good');
     renderHand();
   });
   Bus.on('cardUpgraded', ({ id }) => {
@@ -967,40 +1085,40 @@ function wireEvents() {
   });
   Bus.on('cardRemoved', () => renderHand());
 
-  Bus.on('chestOpened', ({ t, offers }) => {
+  Bus.on('bubblePopped', ({ t, got }) => {
     SFX().chest();
-    FX.burstAt(tileEl(t), { count: 24, colors: FX.PALETTES.gold, speed: 6, grav: -0.05 });
+    FX.burstAt(tileEl(t), { count: 18, colors: FX.PALETTES.cyan, speed: 5, grav: -0.04 });
     updateTile(t);
-    later(() => { if (S().pendingChest) chestModal(offers); }, 350);
   });
-  Bus.on('deckFull', ({ incoming }) => replaceModal(incoming));
+
+  Bus.on('craftNeedsSlot', ({ incoming }) => replaceCraftModal(incoming));
 
   Bus.on('relicGain', ({ id, def }) => {
     SFX().relic();
     banner(Sprites.html('relic_' + id) + ' ' + def.name.toUpperCase(), 'banner-relic');
-    toastLocal(`Relic claimed: ${def.desc}`, 'good');
+    toastLocal(`Trinket claimed: ${def.desc}`, 'good');
     renderHUD();
   });
   Bus.on('relicChoice', ({ offers }) => later(() => { if (S().pendingRelicChoice) relicChoiceModal(offers); }, 500));
 
-  Bus.on('stairsFound', ({ t }) => {
+  Bus.on('liftFound', ({ t }) => {
     SFX().stairs();
-    toastLocal('You found the stairs down!', 'good');
+    toastLocal('You found the Lucky Lift!', 'good');
     FX.burstAt(tileEl(t), { count: 14, colors: FX.PALETTES.cyan, speed: 4 });
   });
-  Bus.on('stairsLocked', () => { FX.shake('sm'); });
+  Bus.on('liftLocked', () => { FX.shake('sm'); });
 
   Bus.on('floorComplete', (data) => {
     SFX().stairs();
     lastFloorEnd = data;
-    later(() => { if (S().phase === 'floorEnd') floorEndModal(data); }, 400);
+    later(() => { if (S().phase === 'floorEnd') liftModal(data); }, 400);
   });
 
   Bus.on('death', (data) => {
     SFX().death();
     FX.shake('lg');
     FX.flash('blood');
-    cancelPendingModals(); // a queued chest/relic modal must not open over the grave
+    cancelPendingModals(); // a queued lift/trinket modal must not open over the grave
     clearTargeting();
     document.body.classList.add('dead');
     later(() => {
@@ -1056,7 +1174,7 @@ function init() {
       else if (!$('#modal').classList.contains('hidden') && $('#modal-content').classList.contains('modal-help')) closeModal();
     }
     const n = parseInt(e.key);
-    if (n >= 1 && n <= 8 && S() && S().phase === 'playing' && !S().pendingChest
+    if (n >= 1 && n <= 8 && S() && S().phase === 'playing'
         && $('#modal').classList.contains('hidden')) {
       if (S().deck[n - 1]) onCardClick(n - 1);
     }

@@ -1,66 +1,47 @@
 /* ============================================================
    DUNGEON SWEEPER — SPRITES
-   Every visual entity is looked up here. Drop PNG files into
-   assets/sprites/ using the filenames below and they are used
-   automatically — otherwise the emoji placeholder renders.
-   (See assets/sprites/README.md)
+   Every visual entity is looked up here. The clay-toy PNGs in
+   assets/sprites/ are wired up from the config (each monster
+   and creature declares its sprite id); if a file is missing
+   the emoji placeholder renders instead.
    ============================================================ */
 (function (root) {
 'use strict';
 
+const C = root.DS_CONFIG;
+
 const MANIFEST = {
-  /* monsters */
-  rat:        { file: 'rat.png',        emoji: '🐀' },
-  bat:        { file: 'bat.png',        emoji: '🦇' },
-  slime:      { file: 'slime.png',      emoji: '🫠' },
-  slimeling:  { file: 'slimeling.png',  emoji: '🫧' },
-  ghost:      { file: 'ghost.png',      emoji: '👻' },
-  skeleton:   { file: 'skeleton.png',   emoji: '💀' },
-  spider:     { file: 'spider.png',     emoji: '🕷️' },
-  orc:        { file: 'orc.png',        emoji: '👹' },
-  shaman:     { file: 'shaman.png',     emoji: '🧙' },
-  mimic:      { file: 'mimic.png',      emoji: '👿' },
-  ogre:       { file: 'ogre.png',       emoji: '🧌' },
-  wraith:     { file: 'wraith.png',     emoji: '🪦' },
-  colossus:   { file: 'colossus.png',   emoji: '🗿' },
-  heart:      { file: 'heart.png',      emoji: '❤️‍🔥' },
   /* board features */
-  chest:      { file: 'chest.png',      emoji: '🎁' },
-  chest_open: { file: 'chest_open.png', emoji: '🎀' },
-  gold:       { file: 'gold.png',       emoji: '🪙' },
-  stairs:     { file: 'stairs.png',     emoji: '🪜' },
-  web:        { file: 'web.png',        emoji: '🕸️' },
-  rubble:     { file: 'rubble.png',     emoji: '🪨' },
-  corpse:     { file: 'corpse.png',     emoji: '🦴' },
-  lock:       { file: 'lock.png',       emoji: '⛓️' },
-  /* cards */
-  card_slash:      { file: 'card_slash.png',      emoji: '⚔️' },
-  card_bow:        { file: 'card_bow.png',        emoji: '🏹' },
-  card_torch:      { file: 'card_torch.png',      emoji: '🔥' },
-  card_heal:       { file: 'card_heal.png',       emoji: '💗' },
-  card_dagger:     { file: 'card_dagger.png',     emoji: '🗡️' },
-  card_excavate:   { file: 'card_excavate.png',   emoji: '⛏️' },
-  card_ward:       { file: 'card_ward.png',       emoji: '🛡️' },
-  card_relocate:   { file: 'card_relocate.png',   emoji: '🌀' },
-  card_scry:       { file: 'card_scry.png',       emoji: '👁️' },
-  card_whirlwind:  { file: 'card_whirlwind.png',  emoji: '🌪️' },
-  card_purify:     { file: 'card_purify.png',     emoji: '🕯️' },
-  card_fireball:   { file: 'card_fireball.png',   emoji: '☄️' },
-  card_chain:      { file: 'card_chain.png',      emoji: '⚡' },
-  card_midas:      { file: 'card_midas.png',      emoji: '👑' },
-  card_focus:      { file: 'card_focus.png',      emoji: '💫' },
-  card_divination: { file: 'card_divination.png', emoji: '🔮' },
-  /* relics */
-  relic_lantern:    { file: 'relic_lantern.png',    emoji: '🏮' },
-  relic_whetstone:  { file: 'relic_whetstone.png',  emoji: '🪓' },
-  relic_quiver:     { file: 'relic_quiver.png',     emoji: '🎯' },
-  relic_bloodvial:  { file: 'relic_bloodvial.png',  emoji: '🩸' },
-  relic_luckycoin:  { file: 'relic_luckycoin.png',  emoji: '🍀' },
-  relic_compass:    { file: 'relic_compass.png',    emoji: '🧭' },
-  relic_boots:      { file: 'relic_boots.png',      emoji: '🥾' },
-  relic_ghostglass: { file: 'relic_ghostglass.png', emoji: '🧿' },
-  relic_stormring:  { file: 'relic_stormring.png',  emoji: '💍' },
+  bubble:  { file: null, emoji: '🫧' },   // drawn in CSS as a shiny orb
+  lift:    { file: 'a07.png', emoji: '🎰' }, // Glitchy, the slot-bot lift
+  web:     { file: null, emoji: '🕸️' },
+  rubble:  { file: null, emoji: '🫠' },   // gunk splat (CSS blob + emoji)
+  splat:   { file: null, emoji: '✨' },   // where a monster got squished
+  lock:    { file: null, emoji: '⛓️' },
+  /* cast photos for special screens */
+  player:   { file: 'b08.png', emoji: '🧑‍🚀' }, // you, a small astronaut of the playroom
+  workshop: { file: 'a02.png', emoji: '🐔' },  // Clucker, the workshop hen
+  slotbot:  { file: 'a07.png', emoji: '🎰' },  // Glitchy again, big size
+  reaper:   { file: 'a14.png', emoji: '💀' },  // the Pink Reaper collects you
 };
+
+/* monsters + creatures declare their sprite file in the config */
+for (const [id, def] of Object.entries(C.monsters)) {
+  MANIFEST[id] = { file: def.sprite ? def.sprite + '.png' : null, emoji: def.emoji };
+}
+for (const [id, def] of Object.entries(C.cards)) {
+  MANIFEST['card_' + id] = { file: def.sprite ? def.sprite + '.png' : null, emoji: def.emoji };
+}
+/* trinkets & materials render as emoji chips (clay buttons) */
+for (const [id, def] of Object.entries(C.relics)) {
+  MANIFEST['relic_' + id] = { file: null, emoji: def.emoji };
+}
+for (const [id, def] of Object.entries(C.shards)) {
+  MANIFEST['shard_' + id] = { file: null, emoji: def.emoji };
+}
+for (const [id, def] of Object.entries(C.ingredients)) {
+  MANIFEST['ing_' + id] = { file: null, emoji: def.emoji };
+}
 
 const BASE = 'assets/sprites/';
 const loaded = {};   // id -> 'img' | 'emoji'
@@ -70,6 +51,7 @@ const loaded = {};   // id -> 'img' | 'emoji'
 function preload() {
   if (typeof Image === 'undefined') return;
   for (const [id, def] of Object.entries(MANIFEST)) {
+    if (!def.file) { loaded[id] = 'emoji'; continue; }
     const img = new Image();
     img.onload = () => {
       loaded[id] = 'img';
@@ -82,7 +64,6 @@ function preload() {
 
 /* Build a sprite element (span with emoji, swapped to img if available) */
 function el(id, cls) {
-  const def = MANIFEST[id] || { emoji: '❓' };
   const span = document.createElement('span');
   span.className = 'sprite ' + (cls || '');
   span.dataset.sprite = id;

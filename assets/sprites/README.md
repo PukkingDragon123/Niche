@@ -1,52 +1,20 @@
-# 🎨 Drop your sprites here
+# 🎨 The clay-toy cast
 
-The game runs with emoji placeholders until PNG files appear in this folder —
-**no code changes needed**. Add a file with the right name and it is picked up
-automatically on the next page load.
+The 60 sprites (`a00.png`–`a29.png`, `b00.png`–`b29.png`) were cut from the
+two art-toy sheets, backgrounds removed. Who's who is declared in
+[`js/config.js`](../../js/config.js) — every monster and squad creature has a
+`sprite: 'aXX'` field — and [`js/sprites.js`](../../js/sprites.js) builds the
+manifest from it automatically.
 
-Recommended: square PNGs with transparency, **64×64 or 128×128**, pixel-art
-friendly (the game renders them with `image-rendering: pixelated`).
+Special cameos wired in `js/sprites.js`:
 
-## Monsters
-| file | replaces |
+| file | role |
 |---|---|
-| `rat.png` | 🐀 Rat |
-| `bat.png` | 🦇 Cave Bat |
-| `slime.png` | 🫠 Slime |
-| `slimeling.png` | 🫧 Slimeling |
-| `ghost.png` | 👻 Ghost |
-| `skeleton.png` | 💀 Skeleton |
-| `spider.png` | 🕷️ Tomb Spider |
-| `orc.png` | 👹 Orc Brute |
-| `shaman.png` | 🧙 Gloom Shaman |
-| `mimic.png` | 👿 Mimic (exposed) |
-| `ogre.png` | 🧌 Ogre Warden (elite) |
-| `wraith.png` | 🪦 Vault Wraith (elite) |
-| `colossus.png` | 🗿 Bone Colossus (boss) |
-| `heart.png` | ❤️‍🔥 The Dungeon Heart (boss) |
+| `b08.png` | the player portrait (sidebar) |
+| `a02.png` | Clucker, the workshop hen |
+| `a07.png` | Glitchy, the Lucky Lift slot-bot |
+| `a14.png` | the Pink Reaper (death screen) |
 
-## Board features
-| file | replaces |
-|---|---|
-| `chest.png` | 🎁 closed chest (mimics use this too!) |
-| `chest_open.png` | opened chest décor |
-| `gold.png` | 🪙 gold vein |
-| `stairs.png` | 🪜 stairs down |
-| `web.png` | 🕸️ spider web overlay |
-| `rubble.png` | 🪨 rubble |
-| `corpse.png` | 🦴 corpse décor |
-| `lock.png` | ⛓️ boss seal on stairs |
-
-## Card art (`card_<id>.png`)
-`card_slash.png`, `card_bow.png`, `card_torch.png`, `card_heal.png`,
-`card_dagger.png`, `card_excavate.png`, `card_ward.png`, `card_relocate.png`,
-`card_scry.png`, `card_whirlwind.png`, `card_purify.png`, `card_fireball.png`,
-`card_chain.png`, `card_midas.png`, `card_focus.png`, `card_divination.png`
-
-## Relics (`relic_<id>.png`)
-`relic_lantern.png`, `relic_whetstone.png`, `relic_quiver.png`,
-`relic_bloodvial.png`, `relic_luckycoin.png`, `relic_compass.png`,
-`relic_boots.png`, `relic_ghostglass.png`, `relic_stormring.png`
-
-The full manifest lives in [`js/sprites.js`](../../js/sprites.js) — add new
-entries there if you invent new monsters or cards.
+To reskin anything, just replace the PNG (square, transparent background,
+~176px). If a file is missing the game falls back to an emoji placeholder —
+no code changes needed.

@@ -55,19 +55,19 @@ void main(){
   float m = fbm(sp * 4.0 - q * 1.2 - t * 0.22);
 
   vec3 col = mix(uColA, uColB, smoothstep(0.25, 0.75, n));
-  col = mix(col, uColC, smoothstep(0.55, 0.95, m) * 0.8);
+  col = mix(col, uColC, smoothstep(0.55, 0.95, m) * 0.6);
 
-  // deep center glow + heavy vignette
-  col += uColC * 0.13 * exp(-r * 3.0) * (1.0 + uPulse * 2.0);
-  col *= 1.0 - smoothstep(0.35, 1.15, r) * 0.75;
-  col *= 0.9 + 0.1 * sin(t * 3.1);
+  // soft playroom light: gentle center brightening, feather-light vignette
+  col += uColC * 0.10 * exp(-r * 2.5) * (1.0 + uPulse * 2.0);
+  col *= 1.0 - smoothstep(0.45, 1.25, r) * 0.22;
+  col *= 0.97 + 0.03 * sin(t * 3.1);
 
   gl_FragColor = vec4(col, 1.0);
 }
 `;
 
 let gl, prog, canvas, uni = {}, raf = 0;
-let target = { a: [0.10, 0.05, 0.18], b: [0.22, 0.08, 0.30], c: [0.55, 0.30, 0.75] };
+let target = { a: [0.93, 0.89, 0.80], b: [0.85, 0.78, 0.88], c: [0.72, 0.82, 0.70] };
 let current = null;
 let pulse = 0;
 let running = false;
@@ -87,10 +87,11 @@ function hueToCols(hue) {
     const p = 2 * l - q;
     return [f(p, q, hh + 1 / 3), f(p, q, hh), f(p, q, hh - 1 / 3)];
   };
+  // three pastel clay tones of one hue family: cream base, mid, accent
   return {
-    a: hsl(h, 0.55, 0.055),
-    b: hsl((h + 0.045) % 1, 0.5, 0.14),
-    c: hsl((h + 0.09) % 1, 0.65, 0.32),
+    a: hsl(h, 0.38, 0.88),
+    b: hsl((h + 0.055) % 1, 0.45, 0.76),
+    c: hsl((h + 0.11) % 1, 0.50, 0.66),
   };
 }
 

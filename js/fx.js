@@ -132,14 +132,15 @@ function flash(kind) {
   el.className = 'flash-' + kind;
 }
 
+/* candy-pastel clay confetti */
 const PALETTES = {
-  gold:  ['#f5b942', '#ffd97a', '#fff3d6', '#e09a2f'],
-  blood: ['#ff4757', '#c0263a', '#ff8a94'],
-  magic: ['#b07ffa', '#7f5af0', '#e3d0ff'],
-  fire:  ['#ff9f43', '#ff6b35', '#ffd166', '#fff3d6'],
-  bone:  ['#e8e4d8', '#cfc9b8', '#a8a190'],
-  green: ['#2ee6a8', '#7dffce', '#0f8f63'],
-  cyan:  ['#3fd8ff', '#a8efff', '#1f9dc4'],
+  gold:  ['#ffcf5c', '#ffe49c', '#fff6dd', '#f0a848'],
+  blood: ['#ff7d6b', '#e85b4b', '#ffb3a7'],
+  magic: ['#c5a3f5', '#a37de8', '#ecdfff'],
+  fire:  ['#ffb15c', '#ff8a50', '#ffd98a', '#fff3d6'],
+  bone:  ['#f2ecdd', '#ddd4bf', '#bcb29c'],
+  green: ['#8fd977', '#c0f0a8', '#5cb84a'],
+  cyan:  ['#7fd8e8', '#c2eef7', '#4bb3ca'],
 };
 
 root.DS = root.DS || {};

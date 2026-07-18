@@ -1,10 +1,12 @@
-# 💀 DUNGEON SWEEPER
+# 🧸 DUNGEON SWEEPER
 
-*The numbers lie in wait. The cards keep you alive.*
+*A squishy clay toybox full of teeth. The numbers lie in wait.*
 
-A **Minesweeper roguelike** where the mines are monsters, the flags are attack
-cards, and the dungeon fights back. Balatro-inspired visuals, Slay the
-Spire-inspired progression. Pure HTML/CSS/JS — no build step, no dependencies.
+A **Minesweeper roguelike** in a goofy claymation art-toy world: the mines are
+monsters, your "cards" are a squad of clay creatures, dead monsters crumble
+into **shards** you craft into new creatures, and the only way down is a
+**slot machine**. Slay the Spire-inspired progression. Pure HTML/CSS/JS —
+no build step, no dependencies.
 
 ## ▶️ Play
 
@@ -18,51 +20,62 @@ python3 -m http.server 8000
 ## 🎮 How it plays
 
 - **Numbers are SUMS, not counts.** A revealed tile shows the *total power* of
-  all monsters in the 8 tiles around it. A "5" might be five rats — or one orc.
-  Cross-reference the **bestiary** to deduce what's hiding where.
-- **Clicking a hidden monster = ambush.** It hits you for its power and stands
-  there, exposed. Clicking an exposed monster slays it barehanded — for its
+  all monsters in the 8 tiles around it. A "5" might be five Rabbles — or one
+  Gronk. Cross-reference the **bestiary** to deduce what's hiding where.
+- **Poking a hidden monster = ambush.** It bops you for its power and stands
+  there, exposed. Poking an exposed monster squishes it barehanded — for its
   power in HP *again*. HP is a resource; spend it wisely.
-- **Cards kill for free.** Instead of flagging, you *act* on your deductions:
-  🏹 **Bow** snipes a tile you believe holds a monster (no ambush), 🔥 **Torch**
-  safely uncovers areas, ⚔️ **Slash** butchers exposed monsters, 🌀 **Relocate**
-  banishes threats back into the dark, 💗 **Heal** keeps you standing.
+- **Your creatures fight for free.** Instead of flagging, you *act* on your
+  deductions: 🤖 **Boombo** snipes a tile you believe holds a monster (no
+  ambush), 🕯️ **Wicky** screams light over whole areas, 🌱 **Chompo** bites
+  exposed monsters, 🛸 **Zorp** abducts threats back into the dark,
+  💗 **Sproutli** keeps you standing.
 - **⚡ Energy comes from revealing tiles.** Every safe reveal charges +1⚡.
   Risk feeds power — hide in a corner and you'll starve.
-- **Chests open Balatro-style booster packs**: pick 1 of 3 cards. Duplicates
-  merge into upgraded **II** versions. Or is that chest a 👿 **Mimic**…?
-- **8 floors**, each a hand-tuned biome with its own roster, elites on 3 & 6,
-  bosses on 4 & 8 (they **seal the stairs**), a shop + rest stop between floors,
-  relics, XP levels, and a **dungeon clock**: 🦇 bats relocate, 👻 ghosts (who
-  are *invisible to the numbers*) drift, 🧙 shamans buff everything around them
-  — watch the omen timers.
+- **Squished monsters crumble into SHARDS** (5 colors: goo/bone/zap/ink/bolt)
+  and **bubbles** pop into crafting ingredients (buttons, springs, googly
+  eyes, fluff, star bits). At **Clucker's Workshop** between floors you craft
+  them into new creatures — crafting a duplicate upgrades it to a **II**.
+  Or is that bubble a 🦪 **Clampearl**…?
+- **🎰 The LUCKY LIFT** is the only way to the next floor: board it and PULL
+  THE LEVER. Pairs and triples pay out HP, energy, shards and ingredients —
+  triple ⭐ is a trinket jackpot. Bosses **jam the lift** until squished.
+- **8 floors**, each a hand-tuned toybox biome from a 40-monster clay cast,
+  elites on 3 & 6, bosses on 4 & 8, trinkets, XP levels, and a **dungeon
+  clock**: 🐱 Napcats flap around, 👻 Boolets (who are *invisible to the
+  numbers*) drift, 🍄 Sporecaps buff everything around them — watch the omen
+  timers.
 
-**Controls:** left-click reveal/fight/open · click a card then a target to play
-it (ESC cancels) · right-click chalks a note · keys 1–8 select cards.
+**Controls:** left-click reveal/fight/pop · click a creature then a target to
+play it (ESC cancels) · right-click chalks a note · keys 1–8 select creatures.
 
 ## 🗂 Project layout
 
 ```
 index.html          page shell
-css/style.css       all styling (Balatro-y juice lives here)
-js/config.js        ⚖️ ALL balance data — monsters, cards, relics, floors
+css/style.css       all styling (clay-toy squish lives here)
+js/config.js        ⚖️ ALL balance data — monsters, creatures, recipes, floors
 js/engine.js        pure game logic (DOM-free, event-driven, testable)
 js/ui.js            DOM rendering + input
 js/fx.js            particles, shake, floating text
-js/shader.js        WebGL swirling background
+js/shader.js        WebGL pastel-swirl background
 js/audio.js         synthesized sound effects (no audio files)
-js/sprites.js       sprite manifest + emoji fallbacks
-assets/sprites/     ← drop your PNG art here (see its README)
+js/sprites.js       sprite manifest (built from config) + emoji fallbacks
+assets/sprites/     the 60 clay-toy PNGs (a00–a29, b00–b29)
 tests/smoke.js      headless engine test (node tests/smoke.js)
 ```
 
-## 🖼 Adding your own sprites
+## 🖼 Sprites
 
-Drop PNGs into `assets/sprites/` with the names listed in
-[`assets/sprites/README.md`](assets/sprites/README.md). Emoji placeholders are
-used for anything missing — swap art at any pace, zero code edits.
+All 60 clay-toy sprites live in `assets/sprites/` as `a00.png`–`b29.png` and
+are wired up in [`js/config.js`](js/config.js) (each monster/creature declares
+its `sprite`). Every single one is used: 40 monsters, 16 squad creatures, plus
+the player portrait (`b08`), Clucker the workshop hen (`a02`), Glitchy the
+slot-bot (`a07`) and the Pink Reaper (`a14`). Swap any file to reskin — emoji
+placeholders appear for anything missing.
 
 ## ⚖️ Tuning
 
-Everything numeric — monster power, card costs, floor rosters, tick timers,
-shop prices — lives in [`js/config.js`](js/config.js). Crank it.
+Everything numeric — monster power, creature costs, crafting recipes, slot
+machine odds and payouts, floor rosters, tick timers — lives in
+[`js/config.js`](js/config.js). Crank it.

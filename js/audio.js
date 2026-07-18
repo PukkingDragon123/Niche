@@ -90,6 +90,10 @@ const SFX = {
   victory()    { [523, 659, 784, 1046, 784, 1046, 1318].forEach((f, i) => tone(f, 0.22, { type: 'square', vol: 0.25, delay: i * 0.13 })); },
   lethal()     { tone(110, 0.4, { type: 'sawtooth', vol: 0.4 }); tone(116, 0.4, { type: 'sawtooth', vol: 0.4 }); },
   buff()       { tone(180, 0.35, { type: 'sawtooth', vol: 0.25, slide: 320 }); },
+  /* the Lucky Lift */
+  spin()       { for (let i = 0; i < 14; i++) tone(500 + (i % 3) * 90, 0.04, { type: 'square', vol: 0.12, delay: i * 0.09 }); },
+  reelStop()   { tone(340, 0.09, { type: 'square', vol: 0.3 }); noise(0.06, { vol: 0.2, freq: 1500 }); },
+  jackpot()    { [659, 784, 1046, 1318, 1046, 1568].forEach((f, i) => tone(f, 0.16, { type: 'square', vol: 0.24, delay: i * 0.09 })); },
 };
 
 function setMuted(m) {

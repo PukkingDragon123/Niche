@@ -37,6 +37,9 @@ const randInt = (n) => Math.floor(rng() * n);
 const pick = (arr) => arr[randInt(arr.length)];
 const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = randInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
+const SHARD_IDS = ['goo', 'bone', 'zap', 'ink', 'bolt'];
+const ING_IDS = ['button', 'spring', 'googly', 'fluff', 'star'];
+
 /* ---------- state ---------- */
 let S = null;
 
@@ -48,7 +51,10 @@ function freshState() {
     floor: 0,                 // 1-based
     hp: 0, maxHp: 0, block: 0,
     energy: 0,
-    gold: 0, xp: 0, level: 1,
+    energyBank: 0,            // ⚡ won at the slot machine, paid out next floor
+    xp: 0, level: 1,
+    frags: { goo: 0, bone: 0, zap: 0, ink: 0, bolt: 0 },   // monster shards
+    ing: { button: 0, spring: 0, googly: 0, fluff: 0, star: 0 }, // bubble ingredients
     deck: [],                 // [{id, tier}]
     relics: [],
     board: null,              // {w,h,tiles[]}
@@ -56,12 +62,12 @@ function freshState() {
     clicks: 0,                // dungeon clock (this floor)
     bootsUsed: false,
     exhausted: {},            // cardId -> true (this floor)
-    pendingChest: null,       // {offers:[{id}], replaceMode?}
     pendingRelicChoice: null, // {offers:[relicId]}
-    shop: null,               // {cards:[{id,price,sold}], healUsed, rested}
-    stats: { kills: 0, goldEarned: 0, clicksTotal: 0, ambushes: 0, chests: 0 },
+    pendingCraft: null,       // creature id awaiting a squad slot (workshop)
+    workshop: null,           // {offers:[id], snackUsed, napped}
+    lift: null,               // {reels:[sym], spun:false} — the slot machine
+    stats: { kills: 0, shardsEarned: 0, clicksTotal: 0, ambushes: 0, bubbles: 0 },
     bossTile: null,
-    firstFloorHelp: true,
   };
 }
 
@@ -98,7 +104,7 @@ function monsterContribution(m) {
   if (!m) return 0;
   if (m.disguised) return 0;                                // mimics pretending to be furniture
   const type = C.monsters[m.type];
-  if (type.ethereal && !hasRelic('ghostglass')) return 0;   // ghosts leave no trace
+  if (type.ethereal && !hasRelic('ghostglass')) return 0;   // spooks leave no trace
   return m.pwr;
 }
 
@@ -112,9 +118,9 @@ function numberAt(t) {
 function showsNumber(t) {
   if (!t.revealed || t.monster || t.rubble) return false;
   if (t.kind === 'empty') return true;
-  if (t.kind === 'gold' && t.collected) return true;
-  if (t.kind === 'chest' && t.opened) return true;
-  return false; // stairs & unopened chests & uncollected gold show icons
+  if (t.kind === 'shards' && t.collected) return true;
+  if (t.kind === 'bubble' && t.opened) return true;
+  return false; // the lift, unpopped bubbles & uncollected shards show icons
 }
 
 function aliveMonsters() { return tiles().filter(t => t.monster); }
@@ -138,9 +144,46 @@ function spendEnergy(n) {
   Bus.emit('energy', { energy: S.energy, spent: n });
 }
 
-function gainGold(n, at) {
-  S.gold += n; S.stats.goldEarned += n;
-  Bus.emit('gold', { gold: S.gold, gained: n, at });
+/* ---------- the clay economy ---------- */
+function gainShards(color, n, at) {
+  if (!SHARD_IDS.includes(color) || n <= 0) return;
+  S.frags[color] += n;
+  S.stats.shardsEarned += n;
+  Bus.emit('shards', { color, gained: n, total: S.frags[color], at });
+}
+function totalShards() { return SHARD_IDS.reduce((s, c) => s + S.frags[c], 0); }
+function spendAnyShards(n) {
+  // snack money: eat from the biggest piles first
+  let left = n;
+  while (left > 0) {
+    const biggest = SHARD_IDS.reduce((a, b) => (S.frags[a] >= S.frags[b] ? a : b));
+    if (S.frags[biggest] <= 0) break;
+    S.frags[biggest]--; left--;
+  }
+  Bus.emit('shards', { color: null, gained: -(n - left), at: null });
+  return left === 0;
+}
+function gainIngredient(kind, n, at) {
+  if (!ING_IDS.includes(kind) || n <= 0) return;
+  S.ing[kind] += n;
+  Bus.emit('ingredients', { kind, gained: n, total: S.ing[kind], at });
+}
+function canAfford(recipe) {
+  for (const [c, n] of Object.entries(recipe.shards || {})) if (S.frags[c] < n) return false;
+  for (const [k, n] of Object.entries(recipe.ing || {})) if (S.ing[k] < n) return false;
+  return true;
+}
+function payRecipe(recipe) {
+  for (const [c, n] of Object.entries(recipe.shards || {})) S.frags[c] -= n;
+  for (const [k, n] of Object.entries(recipe.ing || {})) S.ing[k] -= n;
+  Bus.emit('shards', { color: null, gained: 0, at: null }); // nudge the HUD
+}
+function primaryShard(cardId) {
+  const r = C.cards[cardId].recipe;
+  const entries = Object.entries(r.shards || {});
+  if (!entries.length) return 'goo';
+  entries.sort((a, b) => b[1] - a[1]);
+  return entries[0][0];
 }
 
 function gainXp(n, at) {
@@ -197,11 +240,14 @@ function setupFloor() {
   S.board = board;
   S.placed = false;
   S.clicks = 0;
-  S.energy = C.player.startEnergy + (S.merciful ? 1 : 0);
+  S.energy = Math.min(maxEnergy(), C.player.startEnergy + (S.merciful ? 1 : 0) + S.energyBank);
+  if (S.energyBank) toast(`🔋 The Lift's battery pays out +${S.energyBank}⚡!`, 'good');
+  S.energyBank = 0;
   S.exhausted = {};
   S.bootsUsed = false;
   S.bossTile = null;
   S.block = 0;
+  S.lift = null;
   Bus.emit('floorStart', { floor: S.floor, cfg: f });
 }
 
@@ -217,15 +263,22 @@ function placeBoard(sx, sy) {
   let free = shuffle(tiles().filter(t => !protect.has(t)));
   const take = () => free.pop();
 
-  // stairs — prefer far from the starting click
+  // the Lucky Lift — prefer far from the starting click
   free.sort((a, b) => (Math.hypot(a.x - sx, a.y - sy)) - (Math.hypot(b.x - sx, b.y - sy)));
   const farHalf = free.slice(Math.floor(free.length / 2));
-  const stairs = farHalf[randInt(farHalf.length)];
-  stairs.kind = 'stairs';
-  free = shuffle(free.filter(t => t !== stairs));
+  const lift = farHalf[randInt(farHalf.length)];
+  lift.kind = 'lift';
+  free = shuffle(free.filter(t => t !== lift));
 
-  for (let i = 0; i < f.chests; i++) { const t = take(); if (t) t.kind = 'chest'; }
-  for (let i = 0; i < f.goldTiles; i++) { const t = take(); if (t) { t.kind = 'gold'; t.goldAmt = C.economy.goldTileMin + randInt(C.economy.goldTileMax - C.economy.goldTileMin + 1); } }
+  for (let i = 0; i < f.bubbles; i++) { const t = take(); if (t) t.kind = 'bubble'; }
+  for (let i = 0; i < f.shardTiles; i++) {
+    const t = take();
+    if (t) {
+      t.kind = 'shards';
+      t.shardColor = pick(SHARD_IDS);
+      t.shardAmt = C.economy.shardTileMin + randInt(C.economy.shardTileMax - C.economy.shardTileMin + 1);
+    }
+  }
 
   const density = S.merciful ? C.mercifulDensity : 1;
   const spawnList = [];
@@ -247,8 +300,8 @@ function placeBoard(sx, sy) {
   Bus.emit('boardPlaced', { bestiary: bestiary() });
 
   if (hasRelic('compass')) {
-    const ew = stairs.x < S.board.w / 2 ? 'WEST' : 'EAST';
-    const ns = stairs.y < S.board.h / 2 ? 'NORTH' : 'SOUTH';
+    const ew = lift.x < S.board.w / 2 ? 'WEST' : 'EAST';
+    const ns = lift.y < S.board.h / 2 ? 'NORTH' : 'SOUTH';
     Bus.emit('compass', { hint: ns + '-' + ew });
   }
 }
@@ -286,7 +339,7 @@ function revealFlood(start, opts) {
     const t = queue.shift();
     if (t.revealed || t.rubble) continue;
     if (t.monster) {
-      // disguised mimics surface as innocent "chests" just like the real thing
+      // disguised mimics surface as innocent "bubbles" just like the real thing
       if (t.monster.disguised) {
         t.revealed = true;
         t.web = false; t.mark = 0; // scry marks stay — they see the truth
@@ -298,16 +351,16 @@ function revealFlood(start, opts) {
     t.web = false;
     t.scry = null; t.mark = 0;
     let energyGained = 0;
-    if (t.kind === 'gold' && !t.collected) {
+    if (t.kind === 'shards' && !t.collected) {
       t.collected = true;
-      gainGold(t.goldAmt || 8, t);
+      gainShards(t.shardColor || 'goo', t.shardAmt || 2, t);
     }
     if (gain) energyGained = gainEnergy(1);
     batch.push({ t, energyGained });
     // expand through open ground with zero threat
     const expandable = (t.kind === 'empty') ||
-      (t.kind === 'gold' && t.collected) ||
-      (t.kind === 'chest' && t.opened);
+      (t.kind === 'shards' && t.collected) ||
+      (t.kind === 'bubble' && t.opened);
     if (expandable && numberAt(t) === 0) {
       for (const n of neighbors(t)) {
         if (!n.revealed && (!n.monster || n.monster.disguised) && !n.web && !n.rubble && !seen.has(n)) {
@@ -344,7 +397,7 @@ function afterExposure(t) {
         n.web = true; webbed.push(n);
       }
     }
-    if (webbed.length) { Bus.emit('webbed', { tiles: webbed, spider: t }); toast('The spider spins its web!', 'bad'); }
+    if (webbed.length) { Bus.emit('webbed', { tiles: webbed, spider: t }); toast('The Widow spins her sticky web!', 'bad'); }
   }
 }
 
@@ -359,7 +412,7 @@ function ambush(t) {
   if (hasRelic('boots') && !S.bootsUsed) {
     S.bootsUsed = true;
     dmg = Math.max(1, dmg - 3);
-    toast('🥾 Iron Boots soften the blow!', 'good');
+    toast('🫧 Bubble Wrap softens the blow!', 'good');
   }
   Bus.emit('ambush', { t, monster: m, dmg });
   afterExposure(t);
@@ -380,9 +433,9 @@ function killMonster(t, cause) {
   S.stats.kills++;
 
   if (cause !== 'midas') gainXp(m.basePwr, t);
-  let gold = Math.ceil(m.basePwr / 2) + (hasRelic('luckycoin') ? 1 : 0);
-  if (cause === 'midas') gold = m.basePwr * 3 + (hasRelic('luckycoin') ? 1 : 0);
-  gainGold(gold, t);
+  let shards = Math.ceil(m.basePwr / 2) + (hasRelic('luckycoin') ? 1 : 0);
+  if (cause === 'midas') shards = m.basePwr * 3 + (hasRelic('luckycoin') ? 1 : 0);
+  gainShards(def.frag || 'goo', shards, t);
 
   Bus.emit('kill', { t, type: m.type, def, cause });
 
@@ -390,7 +443,7 @@ function killMonster(t, cause) {
     const spots = shuffle(hiddenCandidates()).slice(0, 2);
     for (const s of spots) spawnMonster(s, 'slimeling');
     if (spots.length) {
-      toast(`The slime splits! ${spots.length} slimeling${spots.length > 1 ? 's' : ''} slither into the dark…`, 'bad');
+      toast(`The Gloop Cloud bursts! ${spots.length} Gloopdrop${spots.length > 1 ? 's' : ''} rain into the dark…`, 'bad');
       Bus.emit('split', { count: spots.length });
     }
   }
@@ -398,7 +451,7 @@ function killMonster(t, cause) {
   if (def.elite) dropRelic(t, 1);
   if (def.boss) {
     dropRelic(t, 2);
-    toast(`${def.name} is destroyed! The stairs are unsealed.`, 'good');
+    toast(`${def.name} is squished! The Lucky Lift whirrs back to life.`, 'good');
     Bus.emit('bossDead', { type: m.type });
   }
 
@@ -408,7 +461,7 @@ function killMonster(t, cause) {
 
 function dropRelic(t, count) {
   const unowned = Object.keys(C.relics).filter(r => !S.relics.includes(r));
-  if (!unowned.length) { gainGold(50, t); return; }
+  if (!unowned.length) { gainShards(pick(SHARD_IDS), 10, t); return; }
   const offers = shuffle(unowned).slice(0, count);
   if (offers.length === 1) {
     S.relics.push(offers[0]);
@@ -420,7 +473,8 @@ function dropRelic(t, count) {
 }
 
 function pickRelic(i) {
-  if (!S.pendingRelicChoice || S.phase !== 'playing') return;
+  // trinkets drop mid-floor (elites/bosses) AND at the slot machine (floorEnd)
+  if (!S.pendingRelicChoice || (S.phase !== 'playing' && S.phase !== 'floorEnd')) return;
   const id = S.pendingRelicChoice.offers[i];
   if (!id) return;
   S.relics.push(id);
@@ -461,7 +515,7 @@ function tickClock() {
     if (bats.length) {
       let moved = 0;
       for (const t of bats) moved += moveMonster(t) ? 1 : 0;
-      if (moved) { toast('🦇 The bats flit to new perches…', 'warn'); Bus.emit('batsMoved', { count: moved }); Bus.emit('numbersChanged', {}); }
+      if (moved) { toast('🐱 The Napcats flap to new perches…', 'warn'); Bus.emit('batsMoved', { count: moved }); Bus.emit('numbersChanged', {}); }
     }
   }
   if (S.clicks % T.ghost === 0) {
@@ -470,9 +524,9 @@ function tickClock() {
       let moved = 0;
       for (const t of ghosts) moved += moveMonster(t) ? 1 : 0;
       if (moved) {
-        toast('👻 A cold draft passes through the halls…', 'warn');
+        toast('👻 A cold little draft giggles through the halls…', 'warn');
         Bus.emit('ghostsDrift', { count: moved });
-        Bus.emit('numbersChanged', {}); // scry marks expired + Ghost Monocle numbers
+        Bus.emit('numbersChanged', {}); // scry marks expired + X-Ray Specs numbers
       }
     }
   }
@@ -488,7 +542,7 @@ function tickClock() {
       }
     }
     if (buffed) {
-      toast(`🧙 A dark ritual empowers ${buffed} monster${buffed > 1 ? 's' : ''}!`, 'bad');
+      toast(`🍄 Sporecap puffs! ${buffed} monster${buffed > 1 ? 's' : ''} swell${buffed > 1 ? '' : 's'} with spores!`, 'bad');
       Bus.emit('ritual', { buffed });
       Bus.emit('numbersChanged', {});
     }
@@ -497,13 +551,13 @@ function tickClock() {
     const m = S.bossTile.monster;
     if (m.damagedSinceTick) {
       m.damagedSinceTick = false;
-      toast('🗿 You staggered the Colossus — its rampage falters!', 'good');
+      toast('👑 You staggered the Gunk King — his tantrum fizzles!', 'good');
     } else {
       const spots = tiles().filter(t => t.revealed && !t.monster && !t.rubble && t.kind === 'empty' && !(t.x === S.bossTile.x && t.y === S.bossTile.y));
       if (spots.length) { const s = pick(spots); s.rubble = true; Bus.emit('rubble', { t: s }); }
       Bus.emit('bossRage', { type: 'colossus' });
-      toast('🗿 THE COLOSSUS RAMPAGES! Rubble rains from above!', 'bad');
-      hurtPlayer(C.bossRules.colossusHit, 'Bone Colossus');
+      toast('👑 THE GUNK KING THROWS A TANTRUM! Gunk splatters everywhere!', 'bad');
+      hurtPlayer(C.bossRules.colossusHit, 'The Gunk King');
       Bus.emit('numbersChanged', {});
     }
   }
@@ -512,7 +566,7 @@ function tickClock() {
     const spot = shuffle(hiddenCandidates())[0];
     if (spot) spawnMonster(spot, C.bossRules.heartSpawn);
     if (m.pwr < m.basePwr + m.buffs) m.pwr += C.bossRules.heartRegen;
-    toast('❤️‍🔥 The Dungeon Heart beats… something scurries in the dark.', 'bad');
+    toast('🎪 The Toybox King decrees… something scurries in the dark.', 'bad');
     Bus.emit('bossRage', { type: 'heart' });
     Bus.emit('numbersChanged', {});
     Bus.emit('bestiary', { bestiary: bestiary() });
@@ -553,13 +607,13 @@ function omens() {
    CLICKS
    ============================================================ */
 function clickTile(x, y, confirmed) {
-  if (S.phase !== 'playing' || S.pendingChest || S.pendingRelicChoice) return { ok: false };
+  if (S.phase !== 'playing' || S.pendingRelicChoice) return { ok: false };
   const t = tileAt(x, y);
   if (!t) return { ok: false };
 
   if (!S.placed) placeBoard(x, y);
 
-  if (t.rubble) { toast('Buried in rubble. Purify or Fireball can clear it.', 'warn'); return { ok: false }; }
+  if (t.rubble) { toast('Buried in gunk. Snorkle or Brew can mop it up.', 'warn'); return { ok: false }; }
 
   /* ----- hidden tile ----- */
   if (!t.revealed) {
@@ -567,8 +621,8 @@ function clickTile(x, y, confirmed) {
       if (S.energy >= 1) spendEnergy(1);
       else {
         // drained? the webs take their toll in blood instead — never a softlock
-        toast('No ⚡ left — the webs slice your hands as you tear through! (-1 HP)', 'bad');
-        const died = hurtPlayer(1, 'the strangling webs');
+        toast('No ⚡ left — the webs sting your hands as you tear through! (-1 HP)', 'bad');
+        const died = hurtPlayer(1, 'the sticky webs');
         if (died) return { ok: true };
       }
       t.web = false;
@@ -580,7 +634,7 @@ function clickTile(x, y, confirmed) {
       return { ok: true, ambush: true };
     }
     if (t.monster && t.monster.disguised) {
-      // a mimic pretending to be a chest — reveals "as" a chest (scry marks persist: they saw the truth)
+      // a mimic pretending to be a bubble — reveals "as" a bubble (scry marks persist: they saw the truth)
       t.revealed = true; t.mark = 0;
       const gained = gainEnergy(1);
       Bus.emit('reveal', { batch: [{ t, energyGained: gained }], manual: true });
@@ -589,14 +643,14 @@ function clickTile(x, y, confirmed) {
     }
     revealFlood(t, { energy: true });
     tickClock();
-    if (t.kind === 'stairs') Bus.emit('stairsFound', { t });
+    if (t.kind === 'lift') Bus.emit('liftFound', { t });
     return { ok: true };
   }
 
   /* ----- revealed tile ----- */
   if (t.monster && t.monster.disguised) {
-    // opening the "chest"… surprise!
-    toast('THE CHEST HAS TEETH! It’s a MIMIC!', 'bad');
+    // popping the "bubble"… surprise!
+    toast('THE BUBBLE HAS TEETH! It’s a MIMIC!', 'bad');
     Bus.emit('mimic', { t });
     const died = ambush(t);
     if (!died) tickClock();
@@ -605,9 +659,9 @@ function clickTile(x, y, confirmed) {
 
   if (t.monster && t.monster.exposed) return bump(t, confirmed);
 
-  if (t.kind === 'chest' && !t.opened) { openChest(t); tickClock(); return { ok: true, chest: true }; }
+  if (t.kind === 'bubble' && !t.opened) { popBubble(t); tickClock(); return { ok: true, bubble: true }; }
 
-  if (t.kind === 'stairs') return useStairs(t);
+  if (t.kind === 'lift') return boardLift(t);
 
   return { ok: false };
 }
@@ -616,7 +670,7 @@ function bump(t, confirmed) {
   const m = t.monster;
   const def = C.monsters[m.type];
   if (def.unbumpable) {
-    toast('Your fists pass through its molten shell — only CARDS can pierce it!', 'warn');
+    toast('Your hands bounce off its royal squish — only CREATURES can dethrone it!', 'warn');
     return { ok: false, unbumpable: true };
   }
   const effective = Math.max(0, m.pwr - S.block);
@@ -642,7 +696,27 @@ function markTile(x, y) {
 }
 
 /* ============================================================
-   CHESTS
+   BUBBLES (ingredients live inside)
+   ============================================================ */
+function popBubble(t) {
+  t.opened = true;
+  S.stats.bubbles++;
+  const got = [];
+  for (let i = 0; i < C.economy.bubbleIngredients; i++) {
+    const kind = pick(ING_IDS);
+    gainIngredient(kind, 1, t);
+    got.push({ ing: kind });
+  }
+  if (rand() < C.economy.bubbleShardChance) {
+    const color = pick(SHARD_IDS);
+    gainShards(color, 2, t);
+    got.push({ shard: color, n: 2 });
+  }
+  Bus.emit('bubblePopped', { t, got });
+}
+
+/* ============================================================
+   CRAFTING / SQUAD
    ============================================================ */
 function rollCardId(excluded) {
   const rare = C.rarityWeights.rare + C.rareFloorBonus * S.floor;
@@ -657,38 +731,11 @@ function rollCardId(excluded) {
   return pool[pool.length - 1][0];
 }
 
-function openChest(t) {
-  t.opened = true;
-  S.stats.chests++;
-  const offers = [];
-  while (offers.length < 3) {
-    const id = rollCardId(offers);
-    if (!offers.includes(id)) offers.push(id);
-  }
-  S.pendingChest = { offers: offers.map(id => ({ id })), at: { x: t.x, y: t.y } };
-  Bus.emit('chestOpened', { t, offers: S.pendingChest.offers });
-}
-
 function deckIndexOf(id) { return S.deck.findIndex(c => c.id === id); }
 
-/* cards that can actually hurt the Dungeon Heart — never let the deck lose its last one */
+/* creatures that can actually hurt the Toybox King — never lose the last one */
 const WEAPON_IDS = ['slash', 'dagger', 'bow', 'whirlwind', 'fireball', 'chain'];
 function weaponCount() { return S.deck.filter(c => WEAPON_IDS.includes(c.id)).length; }
-
-function pickChestCard(i) {
-  if (!S.pendingChest || S.phase !== 'playing') return { ok: false };
-  const offer = S.pendingChest.offers[i];
-  if (!offer) return { ok: false };
-  const res = acquireCard(offer.id);
-  if (res.needsSlot) {
-    S.pendingChest.replaceMode = offer.id;
-    Bus.emit('deckFull', { incoming: offer.id });
-    return { ok: true, needsSlot: true };
-  }
-  S.pendingChest = null;
-  Bus.emit('chestDone', {});
-  return { ok: true, result: res };
-}
 
 function acquireCard(id) {
   const existing = deckIndexOf(id);
@@ -699,8 +746,8 @@ function acquireCard(id) {
       Bus.emit('cardUpgraded', { id, index: existing });
       return { upgraded: true };
     }
-    gainGold(C.economy.dupSellGold, null);
-    toast(`Already mastered — sold for ${C.economy.dupSellGold}g.`, 'info');
+    gainShards(primaryShard(id), C.economy.dupMeltShards, null);
+    toast(`Already mastered — melted into ${C.economy.dupMeltShards} shards.`, 'info');
     return { sold: true };
   }
   if (S.deck.length >= C.player.deckCap) return { needsSlot: true };
@@ -709,32 +756,8 @@ function acquireCard(id) {
   return { added: true };
 }
 
-function replaceCard(deckIdx) {
-  if (!S.pendingChest || !S.pendingChest.replaceMode || S.phase !== 'playing') return { ok: false };
-  const incoming = S.pendingChest.replaceMode;
-  if (deckIdx < 0 || deckIdx >= S.deck.length) return { ok: false };
-  const removed = S.deck[deckIdx].id;
-  if (!WEAPON_IDS.includes(incoming) && WEAPON_IDS.includes(removed) && weaponCount() <= 1) {
-    toast('That is your last weapon — the dungeon would become unwinnable!', 'warn');
-    return { ok: false, why: 'lastWeapon' };
-  }
-  S.deck[deckIdx] = { id: incoming, tier: 1 };
-  S.pendingChest = null;
-  Bus.emit('cardGained', { id: incoming, index: deckIdx, replaced: removed });
-  Bus.emit('chestDone', {});
-  return { ok: true };
-}
-
-function skipChest() {
-  if (!S.pendingChest || S.phase !== 'playing') return { ok: false };
-  gainGold(C.economy.chestSkipGold, null);
-  S.pendingChest = null;
-  Bus.emit('chestDone', { skipped: true });
-  return { ok: true };
-}
-
 /* ============================================================
-   CARDS
+   PLAYING CREATURES
    ============================================================ */
 function scryTile(t, force) {
   if (!t) return;
@@ -750,7 +773,7 @@ function scryTile(t, force) {
 function cardCost(card) {
   const def = C.cards[card.id];
   let cost = def.cost[card.tier - 1];
-  // min 1: a free repeatable card would let you ignore the dungeon clock forever
+  // min 1: a free repeatable creature would let you ignore the dungeon clock forever
   if (card.id === 'bow' && hasRelic('quiver')) cost = Math.max(1, cost - 1);
   return cost;
 }
@@ -766,7 +789,7 @@ function canPlay(deckIdx) {
   const card = S.deck[deckIdx];
   if (!card) return { ok: false, why: 'no card' };
   const def = C.cards[card.id];
-  if (S.phase !== 'playing' || S.pendingChest || S.pendingRelicChoice) return { ok: false, why: 'busy' };
+  if (S.phase !== 'playing' || S.pendingRelicChoice) return { ok: false, why: 'busy' };
   if (def.exhaust && S.exhausted[card.id]) return { ok: false, why: 'exhausted' };
   if (S.energy < cardCost(card)) return { ok: false, why: 'energy' };
   if (!S.placed) return { ok: false, why: 'unplaced' };
@@ -782,15 +805,15 @@ function validTarget(deckIdx, t) {
     case 'exposed':
       if (!(t.monster && t.monster.exposed && !t.monster.disguised)) return false;
       if (card.id === 'relocate' && (C.monsters[t.monster.type].boss || C.monsters[t.monster.type].elite)) return false;
-      if (card.id === 'relocate' && !hiddenCandidates().length) return false; // nowhere to banish to
+      if (card.id === 'relocate' && !hiddenCandidates().length) return false; // nowhere to abduct to
       if (card.id === 'midas' && t.monster.pwr > cardVal(card)) return false;
       return true;
     case 'shoot':
       if (t.rubble) return false;
       if (!t.revealed) return true;                                    // blind shot
       if (t.monster && t.monster.exposed) return true;                 // finish it
-      if (t.monster && t.monster.disguised) return true;               // hidden mimic "chest"
-      if (t.kind === 'chest' && !t.opened) return true;                // test a chest
+      if (t.monster && t.monster.disguised) return true;               // hidden mimic "bubble"
+      if (t.kind === 'bubble' && !t.opened) return true;               // test a bubble
       return false;
     case 'hidden': return !t.revealed && !t.rubble;
     case 'area': return true;
@@ -830,14 +853,14 @@ function playCard(deckIdx, tx, ty) {
 
     case 'bow': {
       if (!t.revealed && !t.monster) {
-        toast('The arrow clatters on stone — the tile was empty.', 'info');
+        toast('Boombo’s shot bonks on clay — the tile was empty.', 'info');
         Bus.emit('arrowMiss', { t });
         revealFlood(t, { energy: false });
       } else if (t.monster) {
-        if (t.monster.disguised) toast('The "chest" SHRIEKS — a MIMIC!', 'bad');
+        if (t.monster.disguised) toast('The "bubble" SHRIEKS — a MIMIC!', 'bad');
         damageMonster(t, v, 'card');
-      } else if (t.kind === 'chest' && !t.opened) {
-        toast('Thunk. Just a sturdy, honest chest.', 'info');
+      } else if (t.kind === 'bubble' && !t.opened) {
+        toast('Boing. Just an honest, wobbly bubble.', 'info');
         Bus.emit('arrowMiss', { t });
       }
       break;
@@ -882,10 +905,10 @@ function playCard(deckIdx, tx, ty) {
         m.exposed = false;
         if (C.monsters[m.type].disguise) m.disguised = true;
         t.revealed = true;
-        toast('The monster is hurled back into the dark…', 'good');
+        toast('Zorp beams the monster back into the dark…', 'good');
         Bus.emit('relocated', { from: t });
         Bus.emit('numbersChanged', {});
-      } else toast('Nowhere left to banish it to!', 'warn');
+      } else toast('Nowhere left to beam it to!', 'warn');
       break;
     }
 
@@ -956,7 +979,7 @@ function playCard(deckIdx, tx, ty) {
           if (d.ethereal || d.disguise) { x.scry = x.monster.type; found++; Bus.emit('scryed', { t: x, what: x.monster.type }); }
         }
       }
-      toast(found ? `The crystal reveals ${found} lurking horror${found > 1 ? 's' : ''}!` : 'The crystal shows nothing… the floor holds no tricksters.', found ? 'good' : 'info');
+      toast(found ? `The 3D glasses reveal ${found} lurking sneak${found > 1 ? 's' : ''}!` : 'The glasses show nothing… the floor holds no tricksters.', found ? 'good' : 'info');
       break;
     }
   }
@@ -966,90 +989,179 @@ function playCard(deckIdx, tx, ty) {
 }
 
 /* ============================================================
-   STAIRS / FLOOR END / SHOP
+   THE LUCKY LIFT / FLOOR END / WORKSHOP
    ============================================================ */
-function useStairs(t) {
+function boardLift(t) {
   const f = floorCfg();
   if (f.boss) {
     const bossAlive = tiles().some(x => x.monster && C.monsters[x.monster.type].boss);
     if (bossAlive) {
-      toast('⛓️ The stairs are SEALED while the boss lives!', 'warn');
-      Bus.emit('stairsLocked', {});
+      toast('⛓️ The Lucky Lift is JAMMED while the boss lives!', 'warn');
+      Bus.emit('liftLocked', {});
       return { ok: false, locked: true };
     }
   }
   let seal = 0;
   if (aliveMonsters().length === 0) {
     seal = C.economy.sealBonus;
-    gainGold(seal, t);
+    gainShards(pick(SHARD_IDS), seal, t);
   }
   S.phase = 'floorEnd';
-  buildShop();
+  buildWorkshop();
+  rollLift();
   Bus.emit('floorComplete', { floor: S.floor, seal, last: S.floor >= C.floors.length, stats: S.stats });
-  return { ok: true, descended: true };
+  return { ok: true, boarded: true };
 }
 
-function buildShop() {
-  const cards = [];
-  // never stock cards the player has already mastered (tier 2)
+function rollLiftSymbol() {
+  const entries = Object.entries(C.lift.symbols);
+  const total = entries.reduce((s, [, d]) => s + d.weight, 0);
+  let r = rand() * total;
+  for (const [id, d] of entries) {
+    r -= d.weight;
+    if (r <= 0) return id;
+  }
+  return entries[entries.length - 1][0];
+}
+
+function rollLift() {
+  // pre-rolled from the run seed — the lever is theater (the best kind)
+  S.lift = { reels: [rollLiftSymbol(), rollLiftSymbol(), rollLiftSymbol()], spun: false };
+}
+
+function spinLift() {
+  if (!S.lift || S.lift.spun || S.phase !== 'floorEnd') return { ok: false };
+  S.lift.spun = true;
+  const reels = S.lift.reels;
+  const counts = {};
+  for (const s of reels) counts[s] = (counts[s] || 0) + 1;
+  let symbol = null, kind = 'none';
+  for (const [s, n] of Object.entries(counts)) {
+    if (n >= 3) { symbol = s; kind = 'triple'; break; }
+    if (n >= 2) { symbol = s; kind = 'pair'; }
+  }
+  const gains = { hp: 0, energy: 0, shards: null, ingredients: [], relic: false };
+  if (kind === 'none') {
+    const color = pick(SHARD_IDS);
+    gainShards(color, C.lift.consolationShards, null);
+    gains.shards = { color, n: C.lift.consolationShards };
+  } else {
+    const pay = C.lift.pay[symbol][kind];
+    if (pay.hp) {
+      const healed = Math.min(S.maxHp - S.hp, pay.hp);
+      S.hp += healed;
+      gains.hp = pay.hp;
+      Bus.emit('healed', { amount: healed, hp: S.hp });
+    }
+    if (pay.energy) { S.energyBank += pay.energy; gains.energy = pay.energy; }
+    if (pay.shard) { gainShards(symbol, pay.shard, null); gains.shards = { color: symbol, n: pay.shard }; }
+    if (pay.ingredients) {
+      for (let i = 0; i < pay.ingredients; i++) {
+        const k = pick(ING_IDS);
+        gainIngredient(k, 1, null);
+        gains.ingredients.push(k);
+      }
+    }
+    if (pay.relic) { gains.relic = true; dropRelic(null, 2); }
+  }
+  Bus.emit('liftSpun', { reels, kind, symbol, gains });
+  return { ok: true, reels, kind, symbol, gains };
+}
+
+function buildWorkshop() {
+  const offers = [];
+  // never offer creatures the player has already mastered (tier 2)
   const excluded = S.deck.filter(c => c.tier >= 2).map(c => c.id);
   for (let i = 0; i < 3; i++) {
-    const id = rollCardId(excluded);
-    excluded.push(id);
-    const base = C.economy.shopPrices[C.cards[id].rarity];
-    const price = Math.round(base * (0.9 + rand() * 0.3)) + S.floor * 2;
-    cards.push({ id, price, sold: false });
+    const id = rollCardId(excluded.concat(offers));
+    offers.push(id);
   }
-  S.shop = { cards, healUsed: false, rested: false };
+  S.workshop = { offers, snackUsed: false, napped: false };
+  S.pendingCraft = null;
 }
 
-function shopBuy(i) {
-  const item = S.shop && S.shop.cards[i];
-  if (!item || item.sold || S.gold < item.price) return { ok: false };
-  const res = acquireCard(item.id);
-  if (res.needsSlot) { toast('Your card belt is full! Remove a card first.', 'warn'); return { ok: false, full: true }; }
-  item.sold = true;
-  S.gold -= item.price;
-  Bus.emit('gold', { gold: S.gold, gained: -item.price });
-  Bus.emit('shopChanged', {});
-  return { ok: true };
+function craftOffer(i) {
+  const w = S.workshop;
+  if (!w || S.phase !== 'floorEnd') return { ok: false };
+  const id = w.offers[i];
+  if (!id) return { ok: false };
+  const recipe = C.cards[id].recipe;
+  if (!canAfford(recipe)) return { ok: false, why: 'materials' };
+  // deck full? materials are only spent once a slot is chosen
+  if (deckIndexOf(id) < 0 && S.deck.length >= C.player.deckCap) {
+    S.pendingCraft = id;
+    Bus.emit('craftNeedsSlot', { incoming: id });
+    return { ok: true, needsSlot: true };
+  }
+  payRecipe(recipe);
+  const res = acquireCard(id);
+  w.offers[i] = null; // crafted (or melted) — the mold is spent
+  Bus.emit('workshopChanged', {});
+  return { ok: true, result: res };
 }
-function shopHeal() {
-  if (!S.shop || S.shop.healUsed || S.gold < C.economy.shopHealCost || S.hp >= S.maxHp) return { ok: false };
-  S.gold -= C.economy.shopHealCost;
-  S.shop.healUsed = true;
-  S.hp = Math.min(S.maxHp, S.hp + C.economy.shopHealAmount);
-  Bus.emit('gold', { gold: S.gold, gained: -C.economy.shopHealCost });
-  Bus.emit('healed', { amount: C.economy.shopHealAmount, hp: S.hp });
-  Bus.emit('shopChanged', {});
-  return { ok: true };
-}
-function shopRemove(deckIdx) {
-  if (!S.shop || S.gold < C.economy.shopRemoveCost || S.deck.length <= 1) return { ok: false };
+
+function replaceCraft(deckIdx) {
+  if (!S.pendingCraft || S.phase !== 'floorEnd') return { ok: false };
+  const incoming = S.pendingCraft;
   if (deckIdx < 0 || deckIdx >= S.deck.length) return { ok: false };
-  if (WEAPON_IDS.includes(S.deck[deckIdx].id) && weaponCount() <= 1) {
-    toast('That is your last weapon — the Dungeon Heart would be unkillable!', 'warn');
+  const removed = S.deck[deckIdx].id;
+  if (!WEAPON_IDS.includes(incoming) && WEAPON_IDS.includes(removed) && weaponCount() <= 1) {
+    toast('That is your last fighter — the dungeon would become unwinnable!', 'warn');
+    return { ok: false, why: 'lastWeapon' };
+  }
+  payRecipe(C.cards[incoming].recipe);
+  S.deck[deckIdx] = { id: incoming, tier: 1 };
+  const w = S.workshop;
+  if (w) { const oi = w.offers.indexOf(incoming); if (oi >= 0) w.offers[oi] = null; }
+  S.pendingCraft = null;
+  Bus.emit('cardGained', { id: incoming, index: deckIdx, replaced: removed });
+  Bus.emit('workshopChanged', {});
+  return { ok: true };
+}
+
+function cancelCraft() { S.pendingCraft = null; }
+
+function craftSnack() {
+  const w = S.workshop;
+  if (!w || w.snackUsed || S.phase !== 'floorEnd') return { ok: false };
+  if (S.hp >= S.maxHp || totalShards() < C.economy.snackCost) return { ok: false };
+  spendAnyShards(C.economy.snackCost);
+  w.snackUsed = true;
+  S.hp = Math.min(S.maxHp, S.hp + C.economy.snackHeal);
+  Bus.emit('healed', { amount: C.economy.snackHeal, hp: S.hp });
+  Bus.emit('workshopChanged', {});
+  return { ok: true };
+}
+
+function recycleCreature(deckIdx) {
+  if (!S.workshop || S.phase !== 'floorEnd' || S.deck.length <= 1) return { ok: false };
+  if (deckIdx < 0 || deckIdx >= S.deck.length) return { ok: false };
+  const card = S.deck[deckIdx];
+  if (WEAPON_IDS.includes(card.id) && weaponCount() <= 1) {
+    toast('That is your last fighter — the Toybox King would be unbeatable!', 'warn');
     return { ok: false, why: 'lastWeapon' };
   }
   const removed = S.deck.splice(deckIdx, 1)[0];
-  S.gold -= C.economy.shopRemoveCost;
-  Bus.emit('gold', { gold: S.gold, gained: -C.economy.shopRemoveCost });
+  gainShards(primaryShard(removed.id), C.economy.recycleRefund, null);
   Bus.emit('cardRemoved', { id: removed.id });
-  Bus.emit('shopChanged', {});
+  Bus.emit('workshopChanged', {});
   Bus.emit('handChanged', {});
   return { ok: true };
 }
-function rest() {
-  if (!S.shop || S.shop.rested) return { ok: false };
-  S.shop.rested = true;
+
+function nap() {
+  const w = S.workshop;
+  if (!w || w.napped || S.phase !== 'floorEnd') return { ok: false };
+  w.napped = true;
   S.hp = Math.min(S.maxHp, S.hp + C.economy.restHeal);
   Bus.emit('healed', { amount: C.economy.restHeal, hp: S.hp });
-  Bus.emit('shopChanged', {});
+  Bus.emit('workshopChanged', {});
   return { ok: true };
 }
 
 function nextFloor() {
   if (S.phase !== 'floorEnd') return { ok: false };
+  if (S.lift && !S.lift.spun) return { ok: false, why: 'spin' }; // the lever is not optional
   if (S.floor >= C.floors.length) {
     S.phase = 'victory';
     Bus.emit('victory', { stats: S.stats, level: S.level });
@@ -1088,8 +1200,9 @@ root.DS.Bus = Bus;
 root.DS.Engine = {
   newRun, toMenu, clickTile, markTile,
   playCard, canPlay, validTargets, validTarget, cardCost, cardVal,
-  pickChestCard, replaceCard, skipChest, pickRelic,
-  shopBuy, shopHeal, shopRemove, rest, nextFloor,
+  pickRelic, spinLift,
+  craftOffer, replaceCraft, cancelCraft, craftSnack, recycleCreature, nap, nextFloor,
+  canAfford, totalShards, primaryShard,
   numberAt, showsNumber, bestiary, omens, tileAt, areaTiles, hasRelic,
   aliveMonsters, xpNeeded, maxEnergy,
   get state() { return S; },

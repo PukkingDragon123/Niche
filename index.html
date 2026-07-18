@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dungeon Sweeper</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💀</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧸</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=VT323&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500..800&family=Fredoka:wght@400..600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -16,7 +16,6 @@
 <canvas id="fx"></canvas>
 <div id="flash"></div>
 <div id="vignette"></div>
-<div id="scanlines"></div>
 
 <div id="game">
 
@@ -24,15 +23,15 @@
   <div id="menu" class="screen">
     <div class="title-wrap">
       <div class="title-cards">
-        <div class="tcard t1">⚔️</div>
-        <div class="tcard t2">🏹</div>
-        <div class="tcard t3">🔥</div>
+        <div class="tcard t1"><img src="assets/sprites/a20.png" alt="Chompo"></div>
+        <div class="tcard t2"><img src="assets/sprites/b23.png" alt="Boombo"></div>
+        <div class="tcard t3"><img src="assets/sprites/a24.png" alt="Brew"></div>
       </div>
       <h1 class="game-title"><span>DUNGEON</span><span class="t-sweep">SWEEPER</span></h1>
-      <p class="tagline">The numbers lie in wait. The cards keep you alive.</p>
+      <p class="tagline">A squishy clay toybox full of teeth. The numbers lie in wait.</p>
     </div>
     <div class="menu-buttons">
-      <button id="btn-start" class="btn btn-big btn-red">⛏ DELVE IN</button>
+      <button id="btn-start" class="btn btn-big btn-red">🧸 DELVE IN</button>
       <div class="menu-row">
         <button id="btn-merciful" class="btn btn-toggle">☠ CURSED</button>
         <button id="btn-help" class="btn">HOW TO PLAY</button>
@@ -46,7 +45,10 @@
 
     <div id="sidebar" class="panel">
       <div class="side-block">
-        <div class="stat-label">VITALITY <span id="block-chip" class="chip hidden"></span></div>
+        <div class="side-you">
+          <img class="you-img" src="assets/sprites/b08.png" alt="you">
+          <div class="stat-label">VITALITY <span id="block-chip" class="chip hidden"></span></div>
+        </div>
         <div id="hp-bar" class="bar hp">
           <div id="hp-ghost" class="bar-ghost"></div>
           <div id="hp-fill" class="bar-fill"></div>
@@ -54,8 +56,10 @@
         </div>
         <div class="stat-label" style="margin-top:10px">ENERGY <span id="energy-text" class="dim"></span></div>
         <div id="energy-pips"></div>
+        <div class="stat-label" style="margin-top:10px">STASH <span class="dim">shards · ingredients</span></div>
+        <div id="stash-shards" class="stash-row"></div>
+        <div id="stash-ing" class="stash-row"></div>
         <div class="stat-row">
-          <div id="gold-stat" class="stat-chip gold">🪙 <b id="gold-text">0</b></div>
           <div class="stat-chip lvl"><b id="level-text">LV 1</b></div>
         </div>
         <div id="xp-bar" class="bar xp">
@@ -70,7 +74,7 @@
       </div>
 
       <div class="side-block">
-        <div class="stat-label">RELICS</div>
+        <div class="stat-label">TRINKETS</div>
         <div id="relics"></div>
       </div>
 
