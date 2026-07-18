@@ -43,7 +43,8 @@ button { font-family: inherit; }
   position: fixed; inset: 0; width: 100vw; height: 100vh;
   z-index: 0; image-rendering: pixelated;
 }
-#fx { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+/* above the modal (80) so slot-machine confetti & victory rain are visible over it */
+#fx { position: fixed; inset: 0; z-index: 86; pointer-events: none; }
 #vignette {
   position: fixed; inset: 0; z-index: 3; pointer-events: none;
   background: radial-gradient(ellipse at center, transparent 55%, rgba(120, 90, 50, 0.16) 100%);
@@ -748,7 +749,9 @@ body.targeting .tile.area-mode .tile-face { filter: brightness(0.92); }
 .shop-head .sprite img { width: 34px; height: 34px; }
 .shop-note { font-family: var(--fvt); font-weight: 400; font-size: 13px; color: var(--ink-dim); }
 .workshop .stash-row { justify-content: center; margin-bottom: 10px; }
-.shop-cards { display: flex; gap: 20px; justify-content: center; margin-bottom: 12px; }
+.shop-cards { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; margin-bottom: 12px; }
+/* the reels spin as pure theater — freeze the workshop so no click reopens the modal mid-spin */
+.modal-box.spinning .workshop { pointer-events: none; opacity: 0.55; filter: saturate(0.7); }
 .shop-item { display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; max-width: 150px; }
 .shop-item .card { margin: 0; transform: scale(0.9); }
 .shop-item:hover .card { transform: scale(1) translateY(-6px); }

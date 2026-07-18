@@ -417,7 +417,61 @@ console.log('\n[4c] slot machine payouts');
   const totalBefore = E.totalShards();
   r = E.spinLift();
   assert(r.kind === 'none' && E.totalShards() === totalBefore + C.lift.consolationShards, 'consolation shards on no match');
+
+  // REGRESSION: heart payout at full HP reports the ACTUAL heal (0), not the nominal prize
+  s = boardLiftFresh(1006);
+  s.hp = s.maxHp;
+  let healedEvents = 0;
+  const hb = DS.Bus.on('healed', () => healedEvents++);
+  s.lift.reels = ['heart', 'heart', 'heart'];
+  r = E.spinLift();
+  DS.Bus.off('healed', hb);
+  assert(r.gains.hp === 0, `heart payout at full HP reports 0 heal (got ${r.gains.hp})`);
+  assert(healedEvents === 0, 'no phantom +0 heal event at full HP');
+
+  // REGRESSION: star jackpot with every trinket owned pays shards, not a phantom trinket
+  s = boardLiftFresh(1007);
+  s.relics = Object.keys(C.relics);
+  s.lift.reels = ['star', 'star', 'star'];
+  const shBefore = E.totalShards();
+  r = E.spinLift();
+  assert(r.gains.relic === false, 'no phantom trinket when all trinkets owned');
+  assert(!s.pendingRelicChoice, 'no dangling relic choice when all owned');
+  assert(E.totalShards() > shBefore, 'full-trinket jackpot pays consolation shards instead');
+
+  // REGRESSION: descending is blocked while a jackpot trinket choice is pending
+  s = boardLiftFresh(1008);
+  s.lift.reels = ['star', 'star', 'star'];
+  E.spinLift();
+  assert(s.pendingRelicChoice, 'star triple leaves a trinket choice pending');
+  const blocked = E.nextFloor();
+  assert(blocked.ok === false && blocked.why === 'relic', 'cannot descend until the jackpot trinket is claimed');
+  E.pickRelic(0);
+  assert(!s.pendingRelicChoice, 'claiming the trinket clears the pending choice');
+
   ok('slot machine verified');
+}
+
+/* ---------------------------------------------------------
+   TEST 4d — the lift fanfare fires however the lift surfaces
+   --------------------------------------------------------- */
+console.log('\n[4d] lift discovery event');
+{
+  E.newRun({ seed: 4242 });
+  const s = E.state;
+  E.clickTile(4, 4);
+  let liftFound = 0;
+  const lf = DS.Bus.on('liftFound', () => liftFound++);
+  // reveal the lift indirectly (torch over it) — not a direct click
+  const lift = s.board.tiles.find(t => t.kind === 'lift');
+  lift.revealed = false;
+  s.hp = 500; s.maxHp = 500; s.energy = 9;
+  s.deck = [{ id: 'torch', tier: 1 }];
+  E.playCard(0, lift.x, lift.y);
+  DS.Bus.off('liftFound', lf);
+  assert(lift.revealed, 'torch revealed the lift');
+  assert(liftFound >= 1, 'liftFound fanfare fires when the lift surfaces indirectly');
+  ok('lift discovery verified');
 }
 
 /* ---------------------------------------------------------

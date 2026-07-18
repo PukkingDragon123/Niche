@@ -228,7 +228,7 @@ const CFG = {
     midas:      { name: 'Fortune',  sprite: 'a18', emoji: '🐱', rarity: 'rare',     target: 'exposed',
                   cost: [3, 3], vals: [4, 6],
                   recipe: { shards: { bone: 8, zap: 5 }, ing: { star: 1, googly: 1 } },
-                  desc: 'The lucky cat pounces: kill an uncovered monster of power ≤{v}. Shards ×3, no XP.' },
+                  desc: 'The lucky cat pounces: kill an uncovered monster of power ≤{v}. Pays 3× its power in shards, no XP.' },
     focus:      { name: 'Blinky',   sprite: 'b27', emoji: '💫', rarity: 'rare',     target: 'none',
                   cost: [0, 0], vals: [4, 6], exhaust: true,
                   recipe: { shards: { ink: 7, bone: 4 }, ing: { star: 1, fluff: 1 } },
@@ -292,10 +292,10 @@ const CFG = {
   ------------------------------------------------------------------ */
   floors: [
     { name: 'The Toy Bin',         w:  9, h:  8, hue: 145,
-      roster: { rat: 5, gulpy: 3, peng: 2, bat: 3, slime: 1 },
+      roster: { rat: 5, gulpy: 3, peng: 2, bat: 3, toejam: 2, slime: 1 },
       bubbles: 2, shardTiles: 3 },
     { name: 'The Sock Drawer',     w: 10, h:  9, hue: 210,
-      roster: { rat: 3, bat: 3, yolko: 2, skeleton: 2, croaks: 1, ghost: 1, slime: 1 },
+      roster: { rat: 3, bat: 3, yolko: 2, skeleton: 2, toejam: 1, binjamin: 1, croaks: 1, ghost: 1, slime: 1 },
       bubbles: 2, shardTiles: 3 },
     { name: 'The Sticky Web Nook', w: 11, h:  9, hue: 275,
       roster: { spider: 4, toejam: 2, lickzard: 2, inkling: 2, ghost: 1, bat: 2, slime: 1 },

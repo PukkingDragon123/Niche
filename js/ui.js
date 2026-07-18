@@ -134,10 +134,11 @@ function sizeBoard() {
   $('#board').style.setProperty('--tw', tw + 'px');
 }
 
-function scryIcon(what) {
+function scryIcon(what, t) {
   if (what === 'empty') return '<span class="scry-ic safe">✓</span>';
   if (what === 'bubble') return `<span class="scry-ic">${Sprites.html('bubble')}</span>`;
-  if (what === 'shards' || what === 'lift') return `<span class="scry-ic">${Sprites.html(what === 'lift' ? 'lift' : 'shard_goo')}</span>`;
+  if (what === 'lift') return `<span class="scry-ic">${Sprites.html('lift')}</span>`;
+  if (what === 'shards') return `<span class="scry-ic">${Sprites.html('shard_' + ((t && t.shardColor) || 'goo'))}</span>`;
   return `<span class="scry-ic bad">${Sprites.html(what)}</span>`;
 }
 
@@ -159,7 +160,7 @@ function updateTile(t, opts) {
     if (t.mark === 2) html += '<span class="mark q">?</span>';
     if (t.scry) {
       d.classList.add('scryed');
-      html += scryIcon(t.scry);
+      html += scryIcon(t.scry, t);
     }
   } else {
     d.classList.add('revealed');
@@ -172,7 +173,7 @@ function updateTile(t, opts) {
       if (m.disguised) {
         d.classList.add('bubble-tile');
         html += '<span class="bubble-orb"></span>';
-        if (t.scry) html += scryIcon(t.scry);
+        if (t.scry) html += scryIcon(t.scry, t);
       } else {
         d.classList.add('monster-tile');
         if (def.elite) d.classList.add('elite');
@@ -568,6 +569,7 @@ function pullLever() {
   if (!res.ok) return;
   const lever = $('#btn-lever');
   if (lever) lever.classList.add('hidden');
+  $('#modal-content').classList.add('spinning'); // freeze the workshop during the theater
   SFX().spin();
   const gen = boardGen;
   // spin the reels, stagger the stops
@@ -597,6 +599,8 @@ function showLiftPayout(res) {
   const msg = $('#lift-msg');
   const btn = $('#btn-descend');
   if (btn) btn.disabled = false;
+  $('#modal-content').classList.remove('spinning');
+  const isLast = !!(lastFloorEnd && lastFloorEnd.last);
   const g = res.gains;
   let text = '';
   if (res.kind === 'triple' && g.relic) {
@@ -608,10 +612,11 @@ function showLiftPayout(res) {
   } else if (res.kind !== 'none') {
     const bits = [];
     if (g.hp) bits.push(`+${g.hp} HP`);
-    if (g.energy) bits.push(`+${g.energy}⚡ next floor`);
-    if (g.shards) bits.push(`+${g.shards.n} ${C.shards[g.shards.color].name} shards`);
+    if (g.energy) bits.push(`+${g.energy}⚡ ${isLast ? 'for the road' : 'next floor'}`);
+    if (g.shards) bits.push(`+${g.shards.n} ${g.shards.color ? C.shards[g.shards.color].name + ' ' : ''}shards`);
     if (g.ingredients.length) bits.push('+' + g.ingredients.map(k => C.ingredients[k].emoji).join(''));
-    text = (res.kind === 'triple' ? '🎉 TRIPLE! ' : '✨ PAIR! ') + bits.join(' · ');
+    text = (res.kind === 'triple' ? '🎉 TRIPLE! ' : '✨ PAIR! ')
+      + (bits.length ? bits.join(' · ') : 'but your pockets were already full!');
     SFX().jackpot();
     FX.burst(innerWidth / 2, innerHeight / 3, { count: 26, colors: FX.PALETTES.gold, speed: 6 });
   } else {
@@ -690,7 +695,8 @@ function replaceCraftModal(incomingId) {
     const d = cardEl(card, i, { static: true });
     d.addEventListener('click', () => {
       const r = Engine.replaceCraft(i);
-      if (r.ok || r.why === 'lastWeapon') reopenLift();
+      // lastWeapon keeps this modal open (engine toasts why) so another slot can be picked
+      if (r.ok || r.why === 'materials') reopenLift();
     });
     grid.appendChild(d);
   });
@@ -835,8 +841,8 @@ function onBoardHover(e) {
     showTip(`<b>${Sprites.html(t.monster.type)} ${def.name}</b> — power ${t.monster.pwr}${t.monster.pwr !== t.monster.basePwr ? ` (base ${t.monster.basePwr})` : ''}<br><i>${def.desc}</i>${extra}`, e.clientX, e.clientY);
   } else if (!t.revealed && t.web) {
     showTip(`${Sprites.html('web')} <b>Webbed</b> — costs 1⚡ to tear (1 HP if you have no ⚡)`, e.clientX, e.clientY);
-  } else if (t.revealed && t.kind === 'shards' && !t.collected) {
-    showTip(`${C.shards[t.shardColor].emoji} <b>Loose ${C.shards[t.shardColor].name} shards.</b> Walk over them to scoop them up.`, e.clientX, e.clientY);
+  } else if (t.revealed && t.kind === 'shards') {
+    showTip(`${C.shards[t.shardColor].emoji} <b>${C.shards[t.shardColor].name} shards</b> — scooped up the moment this tile was uncovered.`, e.clientX, e.clientY);
   } else if (t.revealed && t.kind === 'lift') {
     showTip(`${Sprites.html('lift')} <b>The Lucky Lift.</b> Board it to leave the floor` + (tEl.classList.contains('locked') ? ' — <b class="red">jammed by the boss!</b>' : ' — and spin for prizes.'), e.clientX, e.clientY);
   } else hideTip();
@@ -1099,7 +1105,9 @@ function wireEvents() {
     toastLocal(`Trinket claimed: ${def.desc}`, 'good');
     renderHUD();
   });
-  Bus.on('relicChoice', ({ offers }) => later(() => { if (S().pendingRelicChoice) relicChoiceModal(offers); }, 500));
+  // a slot-machine jackpot must let the reels finish their theater first
+  Bus.on('relicChoice', ({ offers }) => later(() => { if (S().pendingRelicChoice) relicChoiceModal(offers); },
+    S().phase === 'floorEnd' ? 2700 : 500));
 
   Bus.on('liftFound', ({ t }) => {
     SFX().stairs();

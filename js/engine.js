@@ -355,6 +355,8 @@ function revealFlood(start, opts) {
       t.collected = true;
       gainShards(t.shardColor || 'goo', t.shardAmt || 2, t);
     }
+    if (t.kind === 'lift') Bus.emit('liftFound', { t }); // however it surfaced
+
     if (gain) energyGained = gainEnergy(1);
     batch.push({ t, energyGained });
     // expand through open ground with zero threat
@@ -641,9 +643,8 @@ function clickTile(x, y, confirmed) {
       tickClock();
       return { ok: true };
     }
-    revealFlood(t, { energy: true });
+    revealFlood(t, { energy: true }); // emits liftFound if the lift surfaces
     tickClock();
-    if (t.kind === 'lift') Bus.emit('liftFound', { t });
     return { ok: true };
   }
 
@@ -1050,8 +1051,8 @@ function spinLift() {
     if (pay.hp) {
       const healed = Math.min(S.maxHp - S.hp, pay.hp);
       S.hp += healed;
-      gains.hp = pay.hp;
-      Bus.emit('healed', { amount: healed, hp: S.hp });
+      gains.hp = healed; // report what actually happened, not the nominal prize
+      if (healed > 0) Bus.emit('healed', { amount: healed, hp: S.hp });
     }
     if (pay.energy) { S.energyBank += pay.energy; gains.energy = pay.energy; }
     if (pay.shard) { gainShards(symbol, pay.shard, null); gains.shards = { color: symbol, n: pay.shard }; }
@@ -1062,7 +1063,14 @@ function spinLift() {
         gains.ingredients.push(k);
       }
     }
-    if (pay.relic) { gains.relic = true; dropRelic(null, 2); }
+    if (pay.relic) {
+      const relicsBefore = S.relics.length;
+      const shardsBefore = S.stats.shardsEarned;
+      dropRelic(null, 2);
+      // every trinket owned already? dropRelic paid consolation shards instead
+      gains.relic = !!S.pendingRelicChoice || S.relics.length > relicsBefore;
+      if (!gains.relic) gains.shards = { color: null, n: S.stats.shardsEarned - shardsBefore };
+    }
   }
   Bus.emit('liftSpun', { reels, kind, symbol, gains });
   return { ok: true, reels, kind, symbol, gains };
@@ -1109,6 +1117,8 @@ function replaceCraft(deckIdx) {
     toast('That is your last fighter — the dungeon would become unwinnable!', 'warn');
     return { ok: false, why: 'lastWeapon' };
   }
+  // nothing was paid when the slot question was asked — re-check the wallet
+  if (!canAfford(C.cards[incoming].recipe)) { S.pendingCraft = null; return { ok: false, why: 'materials' }; }
   payRecipe(C.cards[incoming].recipe);
   S.deck[deckIdx] = { id: incoming, tier: 1 };
   const w = S.workshop;
@@ -1162,6 +1172,7 @@ function nap() {
 function nextFloor() {
   if (S.phase !== 'floorEnd') return { ok: false };
   if (S.lift && !S.lift.spun) return { ok: false, why: 'spin' }; // the lever is not optional
+  if (S.pendingRelicChoice) return { ok: false, why: 'relic' }; // claim your jackpot first
   if (S.floor >= C.floors.length) {
     S.phase = 'victory';
     Bus.emit('victory', { stats: S.stats, level: S.level });
