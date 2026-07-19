@@ -1,6 +1,6 @@
 /* ============================================================
    DUNGEON SWEEPER — SPRITES
-   Every visual entity is looked up here. The clay-toy PNGs in
+   Every visual entity is looked up here. The monster/creature PNGs in
    assets/sprites/ are wired up from the config (each monster
    and creature declares its sprite id); if a file is missing
    the emoji placeholder renders instead.
@@ -15,12 +15,12 @@ const MANIFEST = {
   bubble:  { file: null, emoji: '🫧' },   // drawn in CSS as a shiny orb
   lift:    { file: 'a07.png', emoji: '🎰' }, // Glitchy, the slot-bot lift
   web:     { file: null, emoji: '🕸️' },
-  rubble:  { file: null, emoji: '🫠' },   // gunk splat (CSS blob + emoji)
-  splat:   { file: null, emoji: '✨' },   // where a monster got squished
+  rubble:  { file: null, emoji: '🫠' },   // sludge splat (CSS blob + emoji)
+  splat:   { file: null, emoji: '✨' },   // where a monster fell
   lock:    { file: null, emoji: '⛓️' },
   /* cast photos for special screens */
-  player:   { file: 'b08.png', emoji: '🧑‍🚀' }, // you, a small astronaut of the playroom
-  workshop: { file: 'a02.png', emoji: '🐔' },  // Clucker, the workshop hen
+  player:   { file: 'b08.png', emoji: '🧑‍🚀' }, // you, a small delver of the warren
+  workshop: { file: 'a02.png', emoji: '🐔' },  // Clucker, the menagerie hen
   slotbot:  { file: 'a07.png', emoji: '🎰' },  // Glitchy again, big size
   reaper:   { file: 'a14.png', emoji: '💀' },  // the Pink Reaper collects you
 };

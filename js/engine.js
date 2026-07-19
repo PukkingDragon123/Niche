@@ -57,16 +57,17 @@ function freshState() {
     ing: { button: 0, spring: 0, googly: 0, fluff: 0, star: 0 }, // bubble ingredients
     deck: [],                 // [{id, tier}]
     relics: [],
+    menagerie: {},            // captured monster type -> count (your collection)
     board: null,              // {w,h,tiles[]}
     placed: false,            // monsters placed after first click
     clicks: 0,                // dungeon clock (this floor)
     bootsUsed: false,
     exhausted: {},            // cardId -> true (this floor)
     pendingRelicChoice: null, // {offers:[relicId]}
-    pendingCraft: null,       // creature id awaiting a squad slot (workshop)
+    pendingCraft: null,       // creature id awaiting a squad slot (menagerie)
     workshop: null,           // {offers:[id], snackUsed, napped}
     lift: null,               // {reels:[sym], spun:false} — the slot machine
-    stats: { kills: 0, shardsEarned: 0, clicksTotal: 0, ambushes: 0, bubbles: 0 },
+    stats: { kills: 0, catches: 0, shardsEarned: 0, clicksTotal: 0, ambushes: 0, bubbles: 0, looted: 0 },
     bossTile: null,
   };
 }
@@ -99,6 +100,15 @@ function areaTiles(t, radius) {
 function hasRelic(id) { return S.relics.includes(id); }
 function maxEnergy() { return C.player.maxEnergy + (hasRelic('stormring') ? 3 : 0); }
 function areaRadius(def) { return (def.radius || 1) + (hasRelic('lantern') ? 1 : 0); }
+
+/* ---------- capturing ---------- */
+function dazeThreshold(m) {
+  let at = C.capture.dazeAt + (hasRelic('charmbell') ? C.capture.charmBonus : 0);
+  return Math.max(at, Math.floor(m.basePwr * C.capture.dazeFrac));
+}
+function canCatch(m) { return !C.monsters[m.type].boss || C.capture.bossCatchable; }
+function isDazed(m) { return !!m && m.exposed && !m.disguised && canCatch(m) && m.pwr <= dazeThreshold(m); }
+function caughtSpecies() { return Object.keys(S.menagerie).length; }
 
 function monsterContribution(m) {
   if (!m) return 0;
@@ -144,7 +154,7 @@ function spendEnergy(n) {
   Bus.emit('energy', { energy: S.energy, spent: n });
 }
 
-/* ---------- the clay economy ---------- */
+/* ---------- the shard economy ---------- */
 function gainShards(color, n, at) {
   if (!SHARD_IDS.includes(color) || n <= 0) return;
   S.frags[color] += n;
@@ -235,7 +245,7 @@ function setupFloor() {
       board.tiles.push({
         x, y, kind: 'empty', monster: null,
         revealed: false, opened: false, collected: false,
-        web: false, rubble: false, mark: 0, scry: null, corpse: null,
+        web: false, rubble: false, mark: 0, scry: null, corpse: null, loot: null,
       });
   S.board = board;
   S.placed = false;
@@ -426,6 +436,50 @@ function ambush(t) {
 /* ============================================================
    KILLING & DAMAGE
    ============================================================ */
+function captureMonster(t) {
+  const m = t.monster;
+  const def = C.monsters[m.type];
+  t.monster = null;
+  t.revealed = true;
+  t.scry = null; t.mark = 0;
+  S.stats.catches++;
+
+  const firstTime = !S.menagerie[m.type];
+  S.menagerie[m.type] = (S.menagerie[m.type] || 0) + 1;
+
+  gainXp(m.basePwr, t);
+  let shards = Math.ceil(m.basePwr / 2) + C.capture.shardBonus + (hasRelic('luckycoin') ? 1 : 0);
+  gainShards(def.frag || 'goo', shards, t);
+  if (firstTime) {
+    gainShards(def.frag || 'goo', C.capture.firstCatchShards, t);
+    gainIngredient(pick(ING_IDS), 1, t);
+  }
+  if (def.elite) dropRelic(t, 1); // even a caught elite yields its trinket
+
+  Bus.emit('capture', { t, type: m.type, def, firstTime, count: S.menagerie[m.type], caught: caughtSpecies() });
+  Bus.emit('numbersChanged', {});
+  Bus.emit('bestiary', { bestiary: bestiary() });
+  return { ok: true, captured: true };
+}
+
+function rollCorpseLoot(t, m) {
+  if (rand() >= C.corpse.lootChance) return;
+  const def = C.monsters[m.type];
+  if (rand() < C.corpse.ingChance) t.loot = { ing: pick(ING_IDS) };
+  else t.loot = { shards: C.corpse.lootShardMin + randInt(C.corpse.lootShardMax - C.corpse.lootShardMin + 1), color: def.frag || 'goo' };
+}
+
+function lootCorpse(t) {
+  if (!t.loot) return { ok: false };
+  const loot = t.loot;
+  t.loot = null;
+  S.stats.looted++;
+  if (loot.ing) gainIngredient(loot.ing, 1, t);
+  else gainShards(loot.color, loot.shards, t);
+  Bus.emit('looted', { t, loot });
+  return { ok: true, looted: true };
+}
+
 function killMonster(t, cause) {
   const m = t.monster;
   const def = C.monsters[m.type];
@@ -438,6 +492,9 @@ function killMonster(t, cause) {
   let shards = Math.ceil(m.basePwr / 2) + (hasRelic('luckycoin') ? 1 : 0);
   if (cause === 'midas') shards = m.basePwr * 3 + (hasRelic('luckycoin') ? 1 : 0);
   gainShards(def.frag || 'goo', shards, t);
+
+  // a destroyed (not caught) monster leaves a lootable corpse — bosses & Fortune excepted
+  if (!def.boss && cause !== 'midas') rollCorpseLoot(t, m);
 
   Bus.emit('kill', { t, type: m.type, def, cause });
 
@@ -453,7 +510,7 @@ function killMonster(t, cause) {
   if (def.elite) dropRelic(t, 1);
   if (def.boss) {
     dropRelic(t, 2);
-    toast(`${def.name} is squished! The Lucky Lift whirrs back to life.`, 'good');
+    toast(`${def.name} is defeated! The Lucky Lift whirrs back to life.`, 'good');
     Bus.emit('bossDead', { type: m.type });
   }
 
@@ -553,13 +610,13 @@ function tickClock() {
     const m = S.bossTile.monster;
     if (m.damagedSinceTick) {
       m.damagedSinceTick = false;
-      toast('👑 You staggered the Gunk King — his tantrum fizzles!', 'good');
+      toast('👑 You staggered the Sludge King — his tantrum fizzles!', 'good');
     } else {
       const spots = tiles().filter(t => t.revealed && !t.monster && !t.rubble && t.kind === 'empty' && !(t.x === S.bossTile.x && t.y === S.bossTile.y));
       if (spots.length) { const s = pick(spots); s.rubble = true; Bus.emit('rubble', { t: s }); }
       Bus.emit('bossRage', { type: 'colossus' });
-      toast('👑 THE GUNK KING THROWS A TANTRUM! Gunk splatters everywhere!', 'bad');
-      hurtPlayer(C.bossRules.colossusHit, 'The Gunk King');
+      toast('👑 THE SLUDGE KING THROWS A TANTRUM! Sludge splatters everywhere!', 'bad');
+      hurtPlayer(C.bossRules.colossusHit, 'The Sludge King');
       Bus.emit('numbersChanged', {});
     }
   }
@@ -568,7 +625,7 @@ function tickClock() {
     const spot = shuffle(hiddenCandidates())[0];
     if (spot) spawnMonster(spot, C.bossRules.heartSpawn);
     if (m.pwr < m.basePwr + m.buffs) m.pwr += C.bossRules.heartRegen;
-    toast('🎪 The Toybox King decrees… something scurries in the dark.', 'bad');
+    toast('👑 The Monster King decrees… something scurries in the dark.', 'bad');
     Bus.emit('bossRage', { type: 'heart' });
     Bus.emit('numbersChanged', {});
     Bus.emit('bestiary', { bestiary: bestiary() });
@@ -615,7 +672,7 @@ function clickTile(x, y, confirmed) {
 
   if (!S.placed) placeBoard(x, y);
 
-  if (t.rubble) { toast('Buried in gunk. Snorkle or Brew can mop it up.', 'warn'); return { ok: false }; }
+  if (t.rubble) { toast('Buried in sludge. Snorkle or Brew can mop it up.', 'warn'); return { ok: false }; }
 
   /* ----- hidden tile ----- */
   if (!t.revealed) {
@@ -660,6 +717,8 @@ function clickTile(x, y, confirmed) {
 
   if (t.monster && t.monster.exposed) return bump(t, confirmed);
 
+  if (t.corpse && t.loot) return lootCorpse(t); // scoop up what a fallen monster left behind
+
   if (t.kind === 'bubble' && !t.opened) { popBubble(t); tickClock(); return { ok: true, bubble: true }; }
 
   if (t.kind === 'lift') return boardLift(t);
@@ -670,8 +729,14 @@ function clickTile(x, y, confirmed) {
 function bump(t, confirmed) {
   const m = t.monster;
   const def = C.monsters[m.type];
+  // a dazed (badly weakened) monster is CAUGHT with bare hands — no HP cost
+  if (isDazed(m)) {
+    const r = captureMonster(t);
+    tickClock();
+    return r;
+  }
   if (def.unbumpable) {
-    toast('Your hands bounce off its royal squish — only CREATURES can dethrone it!', 'warn');
+    toast('Your hands bounce off the King — only CREATURES can topple it!', 'warn');
     return { ok: false, unbumpable: true };
   }
   const effective = Math.max(0, m.pwr - S.block);
@@ -734,7 +799,7 @@ function rollCardId(excluded) {
 
 function deckIndexOf(id) { return S.deck.findIndex(c => c.id === id); }
 
-/* creatures that can actually hurt the Toybox King — never lose the last one */
+/* creatures that can actually hurt the Monster King — never lose the last one */
 const WEAPON_IDS = ['slash', 'dagger', 'bow', 'whirlwind', 'fireball', 'chain'];
 function weaponCount() { return S.deck.filter(c => WEAPON_IDS.includes(c.id)).length; }
 
@@ -854,7 +919,7 @@ function playCard(deckIdx, tx, ty) {
 
     case 'bow': {
       if (!t.revealed && !t.monster) {
-        toast('Boombo’s shot bonks on clay — the tile was empty.', 'info');
+        toast('Boombo’s shot bonks on stone — the tile was empty.', 'info');
         Bus.emit('arrowMiss', { t });
         revealFlood(t, { energy: false });
       } else if (t.monster) {
@@ -1148,7 +1213,7 @@ function recycleCreature(deckIdx) {
   if (deckIdx < 0 || deckIdx >= S.deck.length) return { ok: false };
   const card = S.deck[deckIdx];
   if (WEAPON_IDS.includes(card.id) && weaponCount() <= 1) {
-    toast('That is your last fighter — the Toybox King would be unbeatable!', 'warn');
+    toast('That is your last fighter — the Monster King would be unbeatable!', 'warn');
     return { ok: false, why: 'lastWeapon' };
   }
   const removed = S.deck.splice(deckIdx, 1)[0];
@@ -1215,7 +1280,7 @@ root.DS.Engine = {
   craftOffer, replaceCraft, cancelCraft, craftSnack, recycleCreature, nap, nextFloor,
   canAfford, totalShards, primaryShard,
   numberAt, showsNumber, bestiary, omens, tileAt, areaTiles, hasRelic,
-  aliveMonsters, xpNeeded, maxEnergy,
+  aliveMonsters, xpNeeded, maxEnergy, isDazed, caughtSpecies,
   get state() { return S; },
 };
 

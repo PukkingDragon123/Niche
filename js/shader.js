@@ -57,7 +57,7 @@ void main(){
   vec3 col = mix(uColA, uColB, smoothstep(0.25, 0.75, n));
   col = mix(col, uColC, smoothstep(0.55, 0.95, m) * 0.6);
 
-  // soft playroom light: gentle center brightening, feather-light vignette
+  // soft ambient light: gentle center brightening, feather-light vignette
   col += uColC * 0.10 * exp(-r * 2.5) * (1.0 + uPulse * 2.0);
   col *= 1.0 - smoothstep(0.45, 1.25, r) * 0.22;
   col *= 0.97 + 0.03 * sin(t * 3.1);

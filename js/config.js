@@ -1,7 +1,8 @@
 /* ============================================================
    DUNGEON SWEEPER — CONFIG / BALANCE DATA
-   Clay-toy edition. Everything tunable lives here: monsters,
-   creatures (cards), trinkets, recipes, floors, slot machine.
+   A whimsical monster-catching delve. Everything tunable lives
+   here: monsters, creatures (cards), trinkets, recipes, floors,
+   capturing, corpse loot, and the Lucky Lift.
    ============================================================ */
 (function (root) {
 'use strict';
@@ -47,10 +48,35 @@ const CFG = {
     shardTileMin: 2,         // loose shard piles on the board
     shardTileMax: 4,
     dupMeltShards: 6,        // a 3rd copy of a creature melts into shards
-    snackCost: 6,            // any-mix shards for the workshop snack
+    snackCost: 6,            // any-mix shards for the menagerie snack
     snackHeal: 5,
     recycleRefund: 5,        // shards back for melting a squad creature
     restHeal: 4,             // free nap between floors
+  },
+
+  /* ---------- Capturing ----------
+     A weakened (DAZED) monster can be CAUGHT with your bare hands instead
+     of destroyed — no HP cost, a shard + ingredient bonus, and a spot in
+     your Menagerie. Monsters daze when their current power drops to
+     dazeAt, OR to <= dazeFrac of their base power (whichever is higher).
+  ------------------------------------------------------------------ */
+  capture: {
+    dazeAt: 2,               // always dazed at/below this power…
+    dazeFrac: 0.35,          // …or at/below this fraction of base power
+    charmBonus: 1,           // Charm Bell relic raises dazeAt by this much
+    shardBonus: 2,           // extra shards over a normal kill
+    firstCatchShards: 4,     // one-time bonus the first time you catch a species
+    bossCatchable: false,    // bosses must be defeated, never caught
+  },
+
+  /* ---------- Corpse loot ----------
+     A DESTROYED (not caught) monster leaves a corpse. Click it to loot.
+  ------------------------------------------------------------------ */
+  corpse: {
+    lootChance: 0.55,        // chance a corpse holds anything worth looting
+    lootShardMin: 1,
+    lootShardMax: 3,
+    ingChance: 0.35,         // chance the loot is an ingredient instead of shards
   },
 
   /* ---------- Dungeon clock (ticks happen every N board clicks) ---------- */
@@ -88,7 +114,7 @@ const CFG = {
     spider:    { name: 'Widow',         sprite: 'b24', emoji: '🕷️', pwr: 3, frag: 'ink',
                  desc: 'WEBWEAVER — when uncovered, webs nearby hidden tiles. Webbed tiles cost 1⚡ to reveal (1 HP if you have no ⚡).' },
     orc:       { name: 'Gronk',         sprite: 'a27', emoji: '👹', pwr: 5, frag: 'bone',
-                 desc: 'Five whole power of clay-fisted bad attitude.' },
+                 desc: 'Five whole power of knuckle-dragging bad attitude.' },
     shaman:    { name: 'Sporecap',      sprite: 'a12', emoji: '🍄', pwr: 4, frag: 'goo', tick: 'shaman',
                  desc: 'SPORES — every 12 clicks, puffs +1 power onto every monster around it (even hidden ones). Squish it fast.' },
     mimic:     { name: 'Clampearl',     sprite: 'a05', emoji: '🦪', pwr: 6, frag: 'bone', disguise: true,
@@ -97,12 +123,12 @@ const CFG = {
                  desc: 'ELITE — a wall of fangs guarding a trinket. Its bulk glows in the numbers around it.' },
     wraith:    { name: 'Grimwisp',      sprite: 'b20', emoji: '🪦', pwr: 6, frag: 'ink', elite: true, ethereal: true,
                  desc: 'ELITE + ETHEREAL — a trinket-hoarding shadow that no number will ever betray.' },
-    colossus:  { name: 'The Gunk King', sprite: 'b16', emoji: '👑', pwr: 10, frag: 'goo', boss: true, tick: 'colossus',
-                 desc: 'BOSS — TANTRUM: every 14 clicks it splats you for 2 and buries a tile in gunk, unless you wounded it since its last tantrum. The Lucky Lift is jammed while it lives.' },
-    heart:     { name: 'The Toybox King', sprite: 'a25', emoji: '🎪', pwr: 13, frag: 'ink', boss: true, unbumpable: true, tick: 'heart',
-                 desc: 'FINAL BOSS — ROYAL DECREE: every 10 clicks it summons a Rabble and regrows 1 power. Immune to your bare hands — only creatures can dethrone it. Jams the Lift.' },
+    colossus:  { name: 'The Sludge King', sprite: 'b16', emoji: '👑', pwr: 10, frag: 'goo', boss: true, tick: 'colossus',
+                 desc: 'BOSS — TANTRUM: every 14 clicks it splats you for 2 and buries a tile in sludge, unless you wounded it since its last tantrum. The Lucky Lift is jammed while it lives. Too big to catch — must be defeated.' },
+    heart:     { name: 'The Monster King', sprite: 'a25', emoji: '👑', pwr: 13, frag: 'ink', boss: true, unbumpable: true, tick: 'heart',
+                 desc: 'FINAL BOSS — ROYAL DECREE: every 10 clicks it summons a Rabble and regrows 1 power. Immune to your bare hands — only creatures can topple it. Cannot be caught. Jams the Lift.' },
 
-    /* -- the extended toybox (stat & flag variants; every sprite fights) -- */
+    /* -- the wider bestiary (stat & flag variants; every sprite fights) -- */
     gulpy:     { name: 'Gulpy',        sprite: 'a00', emoji: '🐟', pwr: 2, frag: 'goo',
                  desc: 'All lips, no manners. Two power of soggy kisses.' },
     peng:      { name: 'Peng',         sprite: 'a22', emoji: '🐧', pwr: 2, frag: 'bone',
@@ -250,11 +276,12 @@ const CFG = {
     whetstone:  { name: 'Sharp Teeth',  emoji: '🦷', desc: 'Chompo, Snapjack and Dizzy deal +1 damage.' },
     quiver:     { name: 'Ammo Belt',    emoji: '🎯', desc: 'Boombo costs 1 less ⚡ (min 1) and deals +1 damage.' },
     bloodvial:  { name: 'Juice Box',    emoji: '🧃', desc: 'Leveling up fully heals you.' },
-    luckycoin:  { name: 'Sticky Mitts', emoji: '🧤', desc: '+1 shard from every kill.' },
-    compass:    { name: 'Toy Compass',  emoji: '🧭', desc: 'Whispers which corner of each floor hides the Lucky Lift.' },
+    luckycoin:  { name: 'Sticky Mitts', emoji: '🧤', desc: '+1 shard from every kill or catch.' },
+    compass:    { name: 'Old Compass',  emoji: '🧭', desc: 'Whispers which corner of each floor hides the Lucky Lift.' },
     boots:      { name: 'Bubble Wrap',  emoji: '🫧', desc: 'The first ambush each floor deals 3 less damage (min 1).' },
     ghostglass: { name: 'X-Ray Specs',  emoji: '🥽', desc: 'Ethereal monsters COUNT in adjacent numbers.' },
     stormring:  { name: 'Battery Pack', emoji: '🔋', desc: '+3 maximum ⚡.' },
+    charmbell:  { name: 'Charm Bell',   emoji: '🔔', desc: 'Monsters daze — and become catchable — at higher power. Easier catches.' },
   },
 
   /* ---------- The Lucky Lift (slot machine between floors) ----------
@@ -291,28 +318,28 @@ const CFG = {
      bubbles: ingredient bubbles. shardTiles: loose shard piles.
   ------------------------------------------------------------------ */
   floors: [
-    { name: 'The Toy Bin',         w:  9, h:  8, hue: 145,
+    { name: 'The Mossy Burrow',    w:  9, h:  8, hue: 145,
       roster: { rat: 5, gulpy: 3, peng: 2, bat: 3, toejam: 2, slime: 1 },
       bubbles: 2, shardTiles: 3 },
-    { name: 'The Sock Drawer',     w: 10, h:  9, hue: 210,
+    { name: 'The Whistling Warren', w: 10, h:  9, hue: 210,
       roster: { rat: 3, bat: 3, yolko: 2, skeleton: 2, toejam: 1, binjamin: 1, croaks: 1, ghost: 1, slime: 1 },
       bubbles: 2, shardTiles: 3 },
-    { name: 'The Sticky Web Nook', w: 11, h:  9, hue: 275,
+    { name: 'The Cobweb Hollow',   w: 11, h:  9, hue: 275,
       roster: { spider: 4, toejam: 2, lickzard: 2, inkling: 2, ghost: 1, bat: 2, slime: 1 },
       elite: 'ogre', bubbles: 3, shardTiles: 3 },
-    { name: 'The Gunk Pit',        w: 11, h: 10, hue: 95,
+    { name: 'The Sludge Sump',     w: 11, h: 10, hue: 95,
       roster: { skeleton: 4, knucklehead: 3, binjamin: 2, slurpo: 2, ghost: 1 },
       boss: 'colossus', bubbles: 2, shardTiles: 4 },
-    { name: 'The Bathtime Abyss',  w: 12, h: 10, hue: 190,
+    { name: 'The Drowned Grotto',  w: 12, h: 10, hue: 190,
       roster: { sharkie: 2, prickles: 2, puffpuff: 3, slime: 3, eggward: 2, lordflush: 1, mimic: 1 },
       bubbles: 3, shardTiles: 4 },
-    { name: 'The Shadow Shelf',    w: 12, h: 11, hue: 250,
+    { name: 'The Shadow Roost',    w: 12, h: 11, hue: 250,
       roster: { ghost: 3, chimchim: 2, cubeo: 2, grabbles: 2, tiredtim: 1, shaman: 1, boxbite: 1, bat: 2 },
       elite: 'wraith', bubbles: 3, shardTiles: 4 },
-    { name: 'The Big Toybox',      w: 13, h: 11, hue: 35,
+    { name: 'The Gilded Maze',     w: 13, h: 11, hue: 35,
       roster: { stumpy: 2, sawjaw: 2, corny: 2, beedozer: 2, smoocher: 2, shaman: 2, mimic: 1, boxbite: 1 },
       bubbles: 4, shardTiles: 6 },
-    { name: 'The Playroom Throne', w: 13, h: 12, hue: 325,
+    { name: "The Monster's Lair",  w: 13, h: 12, hue: 325,
       roster: { skeleton: 3, orc: 3, ghost: 3, shaman: 2, slime: 3, eggsack: 2, rat: 2 },
       boss: 'heart', bubbles: 3, shardTiles: 4 },
   ],

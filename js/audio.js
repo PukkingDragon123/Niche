@@ -94,6 +94,10 @@ const SFX = {
   spin()       { for (let i = 0; i < 14; i++) tone(500 + (i % 3) * 90, 0.04, { type: 'square', vol: 0.12, delay: i * 0.09 }); },
   reelStop()   { tone(340, 0.09, { type: 'square', vol: 0.3 }); noise(0.06, { vol: 0.2, freq: 1500 }); },
   jackpot()    { [659, 784, 1046, 1318, 1046, 1568].forEach((f, i) => tone(f, 0.16, { type: 'square', vol: 0.24, delay: i * 0.09 })); },
+  /* monster capturing */
+  capture()    { tone(400, 0.1, { type: 'sine', vol: 0.2, slide: 1200 }); [784, 1046, 1318].forEach((f, i) => tone(f, 0.12, { type: 'triangle', vol: 0.22, delay: 0.08 + i * 0.06 })); noise(0.12, { vol: 0.15, freq: 3000, filter: 'highpass' }); },
+  newCatch()   { [523, 659, 784, 1046, 1318, 1568].forEach((f, i) => tone(f, 0.16, { type: 'sine', vol: 0.24, delay: i * 0.07 })); },
+  loot()       { tone(880, 0.06, { type: 'triangle', vol: 0.2 }); tone(1320, 0.1, { type: 'triangle', vol: 0.18, delay: 0.05 }); },
 };
 
 function setMuted(m) {

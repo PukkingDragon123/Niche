@@ -42,6 +42,7 @@ function checkInvariants(where) {
   if (!(s.energy >= 0 && s.energy <= E.maxEnergy())) fail(`${where}: energy out of range ${s.energy}`);
   for (const c of SHARD_IDS) if (s.frags[c] < 0) fail(`${where}: negative ${c} shards`);
   for (const k of ING_IDS) if (s.ing[k] < 0) fail(`${where}: negative ${k}`);
+  for (const [k, v] of Object.entries(s.menagerie || {})) if (v < 0) fail(`${where}: negative menagerie count ${k}`);
   if (s.deck.length > C.player.deckCap) fail(`${where}: deck over cap (${s.deck.length})`);
   if (s.board) {
     for (const t of s.board.tiles) {
@@ -472,6 +473,63 @@ console.log('\n[4d] lift discovery event');
   assert(lift.revealed, 'torch revealed the lift');
   assert(liftFound >= 1, 'liftFound fanfare fires when the lift surfaces indirectly');
   ok('lift discovery verified');
+}
+
+/* ---------------------------------------------------------
+   TEST 4e — capturing, the menagerie & lootable corpses
+   --------------------------------------------------------- */
+console.log('\n[4e] capturing & corpses');
+{
+  E.newRun({ seed: 2222 });
+  const s = E.state;
+  E.clickTile(4, 4);
+  s.hp = 500; s.maxHp = 500;
+
+  // daze rules: bosses never catchable; charm bell widens the window
+  assert(E.isDazed({ type: 'colossus', basePwr: 10, pwr: 1, exposed: true, disguised: false }) === false,
+    'bosses are never dazed/catchable');
+  const orc = { type: 'orc', basePwr: 5, pwr: 3, exposed: true, disguised: false };
+  assert(!E.isDazed(orc), 'orc at power 3 is not dazed by default');
+  s.relics.push('charmbell');
+  assert(E.isDazed(orc), 'Charm Bell dazes a monster at higher power');
+  s.relics.pop();
+  assert(!E.isDazed({ type: 'rat', basePwr: 1, pwr: 1, exposed: false, disguised: false }),
+    'a hidden monster is never shown as dazed');
+
+  // bare-hand catch of a dazed monster: no HP cost, into the menagerie
+  const mt = s.board.tiles.find(t => t.monster && !C.monsters[t.monster.type].boss && !C.monsters[t.monster.type].disguise);
+  if (assert(mt, 'found a catchable monster')) {
+    mt.revealed = true; mt.monster.exposed = true; mt.monster.pwr = 1; // dazed
+    const type = mt.monster.type;
+    const hpBefore = s.hp;
+    const caughtBefore = E.caughtSpecies();
+    const ingBefore = ING_IDS.reduce((n, k) => n + s.ing[k], 0);
+    assert(E.isDazed(mt.monster), 'weakened exposed monster is dazed');
+    const r = E.clickTile(mt.x, mt.y);
+    assert(r.captured === true, 'clicking a dazed monster catches it');
+    assert(!mt.monster, 'caught monster leaves the board');
+    assert(s.hp === hpBefore, 'catching costs no HP');
+    assert(s.menagerie[type] === 1, 'the menagerie records the catch');
+    assert(E.caughtSpecies() === caughtBefore + 1, 'caught-species count rises');
+    assert(ING_IDS.reduce((n, k) => n + s.ing[k], 0) > ingBefore, 'a first catch grants a bonus ingredient');
+  }
+
+  // destroying a monster leaves a lootable corpse
+  s.deck = [{ id: 'fireball', tier: 2 }];
+  const victim = s.board.tiles.find(t => t.monster && !C.monsters[t.monster.type].boss);
+  if (victim) {
+    let g = 0;
+    while (victim.monster && g++ < 10) { s.energy = 9; E.playCard(0, victim.x, victim.y); if (s.pendingRelicChoice) E.pickRelic(0); }
+    assert(victim.corpse, 'a destroyed monster leaves a corpse');
+    victim.loot = { shards: 3, color: 'goo' }; // force loot for a deterministic check
+    const before = s.frags.goo;
+    const lr = E.clickTile(victim.x, victim.y);
+    assert(lr.looted === true, 'clicking a corpse with loot loots it');
+    assert(s.frags.goo === before + 3, 'looting a corpse adds its shards');
+    assert(!victim.loot, 'loot is consumed once collected');
+    assert(E.clickTile(victim.x, victim.y).ok === false, 'an emptied corpse is inert');
+  }
+  ok('capturing & corpses verified');
 }
 
 /* ---------------------------------------------------------
