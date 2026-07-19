@@ -118,6 +118,8 @@ function buildBoard() {
       if (e.animationName === 'pop-in') d.classList.remove('pop-in');
       if (e.animationName === 'monster-in') d.classList.remove('monster-in');
       if (e.animationName === 'num-pulse') d.classList.remove('num-pulse');
+      if (e.animationName === 'death-poof') d.classList.remove('death-poof');
+      if (e.animationName === 'capture-poof') d.classList.remove('captured-poof');
     });
     board.appendChild(d);
     tileEls.push(d);
@@ -130,7 +132,7 @@ function sizeBoard() {
   if (!S() || !S().board) return;
   const wrap = $('#board-wrap');
   const b = S().board;
-  const GAP = 5, PAD = 30 + 8; // grid gaps + board padding/border
+  const GAP = 6, PAD = 32 + 6; // grid gaps (6px) + board padding (16*2) + border (3*2)
   const availW = wrap.clientWidth - PAD - GAP * (b.w - 1);
   const availH = wrap.clientHeight - PAD - GAP * (b.h - 1);
   const tw = Math.max(22, Math.min(60, Math.floor(Math.min(availW / b.w, availH / b.h))));
@@ -151,8 +153,9 @@ function updateTile(t, opts) {
   const face = d.querySelector('.tile-face');
   const idx = t.y * S().board.w + t.x;
 
-  // keep one-shot entrance animations alive through re-renders
-  const transient = ['pop-in', 'monster-in'].filter(c => d.classList.contains(c));
+  // keep one-shot animations alive through re-renders (a kill/catch re-renders
+  // the whole board via updateAllTiles, which would otherwise strip these)
+  const transient = ['pop-in', 'monster-in', 'death-poof', 'captured-poof'].filter(c => d.classList.contains(c));
   d.className = 'tile' + (transient.length ? ' ' + transient.join(' ') : '');
   let html = '';
 
@@ -749,9 +752,11 @@ function deathModal(data) {
     <h2 class="danger-title">☠ FELLED ☠</h2>
     <p class="modal-sub">The Pink Reaper collected you — felled by <b>${data.source || 'the dungeon'}</b> on floor ${data.floor}</p>
     <div class="stats-grid">
+      <div>Monsters caught <b>${data.stats.catches}</b></div>
+      <div>Species in menagerie <b>${Engine.caughtSpecies()}/${catchableTotal()}</b></div>
       <div>Monsters felled <b>${data.stats.kills}</b></div>
+      <div>Corpses looted <b>${data.stats.looted}</b></div>
       <div>Shards gathered <b>${data.stats.shardsEarned}</b></div>
-      <div>Bubbles popped <b>${data.stats.bubbles}</b></div>
       <div>Level reached <b>${data.level}</b></div>
     </div>
     <div class="btn-row">
@@ -770,9 +775,11 @@ function victoryModal(data) {
     <h2 class="gold-text">👑 DUNGEON CONQUERED 👑</h2>
     <p class="modal-sub">The Monster King has fallen. The warren is yours.</p>
     <div class="stats-grid">
+      <div>Monsters caught <b>${data.stats.catches}</b></div>
+      <div>Species in menagerie <b>${Engine.caughtSpecies()}/${catchableTotal()}</b></div>
       <div>Monsters felled <b>${data.stats.kills}</b></div>
+      <div>Corpses looted <b>${data.stats.looted}</b></div>
       <div>Shards gathered <b>${data.stats.shardsEarned}</b></div>
-      <div>Bubbles popped <b>${data.stats.bubbles}</b></div>
       <div>Final level <b>${data.level}</b></div>
     </div>
     <div class="btn-row">

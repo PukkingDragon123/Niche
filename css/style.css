@@ -572,8 +572,7 @@ body.dying #game { animation: death-tumble 1.3s cubic-bezier(0.4, 0, 0.6, 1) for
   filter: drop-shadow(0 0 4px rgba(255, 207, 92, 0.9));
 }
 @keyframes loot-glint { 0%, 100% { transform: scale(0.8) rotate(-8deg); opacity: 0.7; } 50% { transform: scale(1.2) rotate(8deg); opacity: 1; } }
-.corpse-ov { position: absolute; right: 0px; bottom: -1px; font-size: calc(var(--tw) * 0.26); opacity: 0.6; display: flex; align-items: center; justify-content: center; }
-.dim-chip { opacity: 0.5; font-size: calc(var(--tw) * 0.24); }
+/* .corpse-ov and .dim-chip are defined once in the overlays/shard sections below */
 
 /* bubbles (chests) — shiny soap orbs */
 .tile.bubble-tile .tile-face { cursor: pointer; }

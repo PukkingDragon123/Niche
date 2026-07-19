@@ -62,7 +62,8 @@ const CFG = {
   ------------------------------------------------------------------ */
   capture: {
     dazeAt: 2,               // always dazed at/below this power…
-    dazeFrac: 0.35,          // …or at/below this fraction of base power
+    dazeFrac: 0.5,           // …or at/below this fraction of base power (so bigger
+                             //    monsters daze sooner: ogre 7→3, stumpy/sawjaw 6→3)
     charmBonus: 1,           // Charm Bell relic raises dazeAt by this much
     shardBonus: 2,           // extra shards over a normal kill
     firstCatchShards: 4,     // one-time bonus the first time you catch a species
